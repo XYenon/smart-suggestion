@@ -1,5 +1,11 @@
 #!/usr/bin/env zsh
 
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+CONFIG_DIR="${XDG_CONFIG_HOME}/smart-suggestion"
+if [[ -f "${CONFIG_DIR}/config.zsh" ]]; then
+    source "${CONFIG_DIR}/config.zsh"
+fi
+
 # Default key binding
 (( ! ${+SMART_SUGGESTION_KEY} )) &&
     typeset -g SMART_SUGGESTION_KEY='^o'
@@ -49,7 +55,7 @@ fi
 if [[ -z "$SMART_SUGGESTION_BINARY" ]]; then
     candidates=(
         "${0:a:h}/smart-suggestion"
-        "$HOME/.config/smart-suggestion/smart-suggestion"
+        "${CONFIG_DIR}/smart-suggestion"
     )
     for bin in "${candidates[@]}"; do
         if [[ -f "$bin" ]]; then
