@@ -470,8 +470,13 @@ func fetchOpenAI() (string, error) {
 		url = fmt.Sprintf("https://%s/v1/chat/completions", baseURL)
 	}
 
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
 	request := OpenAIRequest{
-		Model: "gpt-4o-mini",
+		Model: model,
 		Messages: []OpenAIMessage{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: input},
@@ -677,8 +682,13 @@ func fetchAnthropic() (string, error) {
 		url = fmt.Sprintf("https://%s/v1/messages", baseURL)
 	}
 
+	model := os.Getenv("ANTHROPIC_MODEL")
+	if model == "" {
+		model = "claude-3-5-sonnet-20241022"
+	}
+
 	request := AnthropicRequest{
-		Model:     "claude-3-5-sonnet-20241022",
+		Model:     model,
 		MaxTokens: 1000,
 		System:    systemPrompt,
 		Messages: []AnthropicMessage{
