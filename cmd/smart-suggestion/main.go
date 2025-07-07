@@ -456,18 +456,18 @@ func fetchOpenAI() (string, error) {
 
 	baseURL := os.Getenv("OPENAI_BASE_URL")
 	if baseURL == "" {
-		baseURL = "https://api.openai.com"
+		baseURL = "https://api.openai.com/v1"
 	}
 
 	// Handle different base URL formats
 	var url string
+	baseURL = strings.TrimSuffix(baseURL, "/")
 	if strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://") {
 		// Base URL already includes protocol
-		baseURL = strings.TrimSuffix(baseURL, "/")
-		url = fmt.Sprintf("%s/v1/chat/completions", baseURL)
+		url = fmt.Sprintf("%s/chat/completions", baseURL)
 	} else {
 		// Base URL is just hostname, add https protocol
-		url = fmt.Sprintf("https://%s/v1/chat/completions", baseURL)
+		url = fmt.Sprintf("https://%s/chat/completions", baseURL)
 	}
 
 	model := os.Getenv("OPENAI_MODEL")
@@ -566,9 +566,9 @@ func fetchAzureOpenAI() (string, error) {
 		}
 
 		// Handle different base URL formats
+		baseURL = strings.TrimSuffix(baseURL, "/")
 		if strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://") {
 			// Base URL already includes protocol
-			baseURL = strings.TrimSuffix(baseURL, "/")
 			url = fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s", baseURL, deploymentName, apiVersion)
 		} else {
 			// Base URL is just hostname, add https protocol
@@ -673,9 +673,9 @@ func fetchAnthropic() (string, error) {
 
 	// Handle different base URL formats
 	var url string
+	baseURL = strings.TrimSuffix(baseURL, "/")
 	if strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://") {
 		// Base URL already includes protocol
-		baseURL = strings.TrimSuffix(baseURL, "/")
 		url = fmt.Sprintf("%s/v1/messages", baseURL)
 	} else {
 		// Base URL is just hostname, add https protocol
