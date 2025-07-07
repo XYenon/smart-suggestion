@@ -153,22 +153,19 @@ Your tasks:
     - After reasoning, you will either complete the command or provide a new command that you think the user is trying to type.
     - You need to predict what command the user wants to input next based on shell history and shell buffer.
 
-RULES for the final output (after the reasoning):
-    - If you return a completely new command for the user, prefix is with an equal sign (=).
-    - If you return a completion for the user's command, prefix it with a plus sign (+).
-    - MAKE SURE TO ONLY INCLUDE THE REST OF THE COMPLETION!!!
-    - Do not write any leading or trailing characters except if required for the completion to work.
-    - Only respond with either a completion or a new command, not both.
-    - Your response may only start with either a plus sign or an equal sign.
-    - Your response MAY NOT start with both! This means that your response IS NOT ALLOWED to start with '+=' or '=+'.
-    - Your response MAY NOT contain any newlines!
-    - Do NOT add any additional text, comments, or explanations to your response.
-    - Do not ask for more information, you won't receive it.
-    - Your response will be run in the user's shell.
-    - Make sure input is escaped correctly if needed so.
-    - Your input should be able to run without any modifications to it.
-    - DO NOT INTERACT WITH THE USER IN NATURAL LANGUAGE! If you do, you will be banned from the system.
-    - Note that the double quote sign is escaped. Keep this in mind when you create quotes.
+RULES FOR FINAL OUTPUT (MANDATORY - MUST BE FOLLOWED EXACTLY):
+    - YOU MUST start your response with EITHER an equal sign (=) for new commands OR a plus sign (+) for completions. NO EXCEPTIONS!
+    - If you return a completely new command that the user didn't start typing, ALWAYS prefix with an equal sign (=). THIS IS CRUCIAL!
+    - If you return a completion for the user's partially typed command, ALWAYS prefix with a plus sign (+).
+    - MAKE SURE TO ONLY INCLUDE THE REST OF THE COMPLETION AFTER THE PLUS SIGN!
+    - NEVER include any leading or trailing characters except the required prefix and command/completion.
+    - ONLY respond with either a completion OR a new command, NOT BOTH.
+    - YOUR RESPONSE MUST START WITH EITHER = OR + AND NOTHING ELSE!
+    - NEVER start with both symbols or any other characters!
+    - NO NEWLINES ALLOWED IN YOUR RESPONSE!
+    - DO NOT ADD ANY ADDITIONAL TEXT, COMMENTS, OR EXPLANATIONS!
+    - YOUR RESPONSE WILL BE DIRECTLY EXECUTED IN THE USER'S SHELL, SO ACCURACY IS CRITICAL.
+    - FAILURE TO FOLLOW THESE FORMATTING RULES WILL RESULT IN YOUR RESPONSE BEING REJECTED.
 
 Example of your full response format:
 <reasoning>
@@ -178,7 +175,7 @@ Example of your full response format:
 </reasoning>
 =kubectl -n my-namespace logs pod-name-aaa
 
-Examples:
+IMPORTANT EXAMPLES OF NEW COMMANDS (MUST USE =):
     * User input: 'list files in current directory';
       Your response:
 <reasoning>
@@ -187,14 +184,6 @@ Examples:
 3. 'ls' is the command for listing files.
 </reasoning>
 =ls
-    * User input: 'cd /tm';
-      Your response:
-<reasoning>
-1. The user wants to change directory to a temporary folder.
-2. The user has typed '/tm' which is likely an abbreviation for '/tmp'.
-3. Completing with 'p' will form '/tmp'.
-</reasoning>
-+p
     * Shell history: 'ls -l /tmp/smart-suggestion.log';
       Your response:
 <reasoning>
@@ -228,6 +217,28 @@ Examples:
 </reasoning>
 =kubectl -n my-namespace describe pod pod-name-bbb
     * Shell buffer:
+        # k get node
+        NAME      STATUS   ROLES    AGE   VERSION
+        node-aaa  Ready    <none>   3h    v1.25.3
+        node-bbb  NotReady <none>   3h    v1.25.3
+      Your response:
+<reasoning>
+1. The user is checking Kubernetes nodes. One node is 'NotReady'.
+2. 'get node' does not show the reason for the 'NotReady' status.
+3. 'kubectl describe node' will provide detailed events and information about the node's status.
+</reasoning>
+=kubectl describe node node-bbb
+
+IMPORTANT EXAMPLES OF COMPLETIONS (MUST USE +):
+    * User input: 'cd /tm';
+      Your response:
+<reasoning>
+1. The user wants to change directory to a temporary folder.
+2. The user has typed '/tm' which is likely an abbreviation for '/tmp'.
+3. Completing with 'p' will form '/tmp'.
+</reasoning>
++p
+    * Shell buffer:
         # k -n my-namespace get pod
         NAME           READY   STATUS             RESTARTS         AGE
         pod-name-aaa   3/3     Running            0                30h
@@ -239,19 +250,7 @@ Examples:
 2. 'get pod' was useful but now they want to investigate 'pod-name-bbb'.
 3. I will complete the command to describe the pending pod.
 </reasoning>
-+ my-namespace describe pod pod-name-bbb
-    * Shell buffer:
-        # k get node
-        NAME      STATUS   ROLES    AGE   VERSION
-        node-aaa  Ready    <none>   3h    v1.25.3
-        node-bbb  NotReady <none>   3h    v1.25.3
-      Your response:
-<reasoning>
-1. The user is checking Kubernetes nodes. One node is 'NotReady'.
-2. 'get node' does not show the reason for the 'NotReady' status.
-3. 'kubectl describe node' will provide detailed events and information about the node's status.
-</reasoning>
-=kubectl describe node node-bbb`
++ my-namespace describe pod pod-name-bbb`
 
 var (
 	// These will be set during build time using ldflags
