@@ -47,8 +47,12 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
     fi
 fi
 
+XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+SMART_SUGGESTION_CACHE_DIR="${XDG_CACHE_HOME}/smart-suggestion"
+mkdir -p "$SMART_SUGGESTION_CACHE_DIR"
+
 if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-    touch /tmp/smart-suggestion.log
+    touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
 fi
 
 # Detect binary path
@@ -81,6 +85,13 @@ function _run_smart_suggestion_proxy() {
 }
 
 function _fetch_suggestions() {
+    # Source config file and export all variables
+    if [[ -f "${CONFIG_DIR}/config.zsh" ]]; then
+        set -a
+        source "${CONFIG_DIR}/config.zsh"
+        set +a
+    fi
+
     # Prepare debug flag
     local debug_flag=""
     if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
@@ -93,11 +104,18 @@ function _fetch_suggestions() {
         context_flag="--context"
     fi
 
+    # Capture shell context to avoid spawning interactive shells in Go binary
+    local shell_aliases=$(alias 2>/dev/null)
+    local history_lines="${SMART_SUGGESTION_HISTORY_LINES:-10}"
+    local shell_history=$(fc -ln -$history_lines 2>/dev/null)
+
     # Call the Go binary with proper arguments
+    SMART_SUGGESTION_ALIASES="$shell_aliases" \
+    SMART_SUGGESTION_HISTORY="$shell_history" \
     "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
         --input "$input" \
-        --output "/tmp/smart_suggestion" \
+        --output "${SMART_SUGGESTION_CACHE_DIR}/suggestion" \
         $debug_flag \
         $context_flag
 
@@ -114,7 +132,7 @@ function _show_loading_animation() {
     cleanup() {
         kill $pid
         tput -S <<<"bicr ed rc cnorm"
-        touch /tmp/.smart_suggestion_canceled
+        touch "${SMART_SUGGESTION_CACHE_DIR}/canceled"
     }
     trap cleanup SIGINT
 
@@ -139,9 +157,9 @@ function _show_loading_animation() {
 
 function _do_smart_suggestion() {
     ##### Get input
-    rm -f /tmp/smart_suggestion
-    rm -f /tmp/.smart_suggestion_canceled
-    rm -f /tmp/.smart_suggestion_error
+    rm -f "${SMART_SUGGESTION_CACHE_DIR}/suggestion"
+    rm -f "${SMART_SUGGESTION_CACHE_DIR}/canceled"
+    rm -f "${SMART_SUGGESTION_CACHE_DIR}/error"
     local input=$(echo "${BUFFER:0:$CURSOR}" | tr '\n' ';')
 
     _zsh_autosuggest_clear
@@ -154,21 +172,26 @@ function _do_smart_suggestion() {
     local response_code=$?
 
     if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-        echo "{\"date\":\"$(date)\",\"log\":\"Fetched message\",\"input\":\"$input\",\"response_code\":\"$response_code\"}" >> /tmp/smart-suggestion.log
+        if command -v jq >/dev/null 2>&1; then
+            jq -n --arg date "$(date)" --arg log "Fetched message" --arg input "$input" --arg response_code "$response_code" \
+                '{date: $date, log: $log, input: $input, response_code: $response_code}' >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+        else
+            echo "{\"date\":\"$(date)\",\"log\":\"Fetched message\",\"input\":\"$input\",\"response_code\":\"$response_code\"}" >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+        fi
     fi
 
-    if [[ -f /tmp/.smart_suggestion_canceled ]]; then
+    if [[ -f "${SMART_SUGGESTION_CACHE_DIR}/canceled" ]]; then
         _zsh_autosuggest_clear
         return 1
     fi
 
-    if [[ ! -f /tmp/smart_suggestion ]]; then
+    if [[ ! -f "${SMART_SUGGESTION_CACHE_DIR}/suggestion" ]]; then
         _zsh_autosuggest_clear
-        echo $(cat /tmp/.smart_suggestion_error 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
+        echo $(cat "${SMART_SUGGESTION_CACHE_DIR}/error" 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
         return 1
     fi
 
-    local message=$(cat /tmp/smart_suggestion)
+    local message=$(cat "${SMART_SUGGESTION_CACHE_DIR}/suggestion")
 
     ##### Process response
 

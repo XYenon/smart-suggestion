@@ -290,7 +290,7 @@ Enable debug logging to troubleshoot issues:
 export SMART_SUGGESTION_DEBUG=true
 ```
 
-Debug logs are written to `/tmp/smart-suggestion.log`.
+Debug logs are written to `~/.cache/smart-suggestion/debug.log`.
 
 ### Common Issues
 
