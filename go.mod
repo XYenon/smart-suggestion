@@ -2,8 +2,6 @@ module github.com/yetone/smart-suggestion
 
 go 1.23.0
 
-toolchain go1.23.1
-
 require (
 	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.8.0
