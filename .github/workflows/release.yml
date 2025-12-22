@@ -1,189 +1,66 @@
-name: Release
+name: smart-suggestion Image CI
+permissions: {}
 
 on:
+  pull_request:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release'
-        required: true
-        default: 'v1.0.0'
+    branches:
+    - 'beyond'
 
-permissions:
-  contents: write
+env:
+  # KO_DOCKER_REPO: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/smart-suggestion
+  KO_DOCKER_REPO: local/smart-suggestion
 
 jobs:
-  build:
-    name: Build and Release
-    runs-on: ubuntu-latest
+  ci-test-and-release:
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          - os: linux
-            arch: amd64
-            goos: linux
-            goarch: amd64
-          - os: linux
-            arch: arm64
-            goos: linux
-            goarch: arm64
-          - os: darwin
-            arch: amd64
-            goos: darwin
-            goarch: amd64
-          - os: darwin
-            arch: arm64
-            goos: darwin
-            goarch: arm64
-
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          persist-credentials: false
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.21'
+      - uses: actions/setup-go@4dc6199c7b1a012772edbd06daecab0f50c9053c # v6.1.0
+        with:
+          check-latest: true
+          cache: false
+          go-version-file: 'go.mod'
 
-    - name: Get dependencies
-      run: go mod download
+      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
+      - run: ko build --local --platform ${{ matrix.platform }} --bare ./cmd/...
 
-    - name: Build binary
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-        CGO_ENABLED: 0
-      run: |
-        VERSION=${GITHUB_REF_NAME#v}
-        BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        GIT_COMMIT=$(git rev-parse --short HEAD)
+      -
+        name: Smoke Test
+        env:
+          _TARGETARCH: ${{ matrix.platform }}
+        run: |
+          docker run --rm "${{ env.KO_DOCKER_REPO }}:latest" --help
 
-        mkdir -p dist
-        go build -ldflags="-w -s -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.GitCommit=$GIT_COMMIT -X main.OS=$GOOS -X main.Arch=$GOARCH" \
-          -o dist/smart-suggestion-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} ./cmd/main.go
+          SMART_SUGGESTION_BINARY=$(
+              sudo find /var/lib/docker/overlay2/ -type f -name smart-suggestion -size +2000k -print | head -n 1
+          )
+          RENAMED_WITH_ARCH="smart-suggestion-${_TARGETARCH//linux\//linux-}"
+          sudo install -pvD "${SMART_SUGGESTION_BINARY}" "/usr/local/bin/${RENAMED_WITH_ARCH}"
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: smart-suggestion-${{ matrix.os }}-${{ matrix.arch }}
-        path: dist/smart-suggestion-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: dist
-
-    - name: Prepare release assets
-      run: |
-        mkdir -p release-assets
-        
-        # In v4, artifacts are downloaded into subdirectories named after the artifact
-        # Each artifact directory contains the binary file
-        echo "Contents of dist directory:"
-        find dist -type f -ls
-        
-        # Copy binaries from artifact subdirectories to release-assets
-        find dist -name "smart-suggestion-*" -type f -exec cp {} release-assets/ \;
-        
-        # List what we copied
-        echo "Contents of release-assets after copying:"
-        ls -la release-assets/
-        
-        # Create archive for each platform with plugin files
-        for binary_path in release-assets/smart-suggestion-*; do
-          # Skip if it's a directory or doesn't exist
-          if [[ ! -f "$binary_path" ]]; then
-            echo "Skipping $binary_path (not a file)"
-            continue
+          # build for darwin-arm64
+          if [[ "${_TARGETARCH}" = 'linux/arm64' ]]; then
+              GOOS='darwin' go build -trimpath -ldflags="-s -w" \
+                  -o "/usr/local/bin/smart-suggestion-darwin-arm64" ./cmd/smart-suggestion/main.go
           fi
-          
-          binary_name=$(basename "$binary_path")
-          platform_arch=$(echo "$binary_name" | sed 's/smart-suggestion-//')
-          
-          echo "Processing binary: $binary_name for platform: $platform_arch"
-          
-          # Use a temporary directory name to avoid conflicts with binary files
-          temp_dir="release-assets/temp-$platform_arch"
-          
-          # Create platform-specific directory (remove if exists first)
-          rm -rf "$temp_dir"
-          mkdir -p "$temp_dir"
-          
-          # Copy binary and make it executable
-          cp "$binary_path" "$temp_dir/smart-suggestion"
-          chmod +x "$temp_dir/smart-suggestion"
-          
-          # Copy plugin files
-          cp smart-suggestion.plugin.zsh "$temp_dir/"
-          cp README.md "$temp_dir/"
-          
-          # Create tar.gz archive with proper directory name
-          cd release-assets
-          rm -rf "smart-suggestion-$platform_arch"
-          # Rename temp directory to final name for archive
-          mv "temp-$platform_arch" "smart-suggestion-$platform_arch"
-          tar -czf "smart-suggestion-$platform_arch.tar.gz" "smart-suggestion-$platform_arch"
-          cd ..
-          
-          echo "Created archive: smart-suggestion-$platform_arch.tar.gz"
-          
-          # Clean up directory
-          rm -rf "release-assets/smart-suggestion-$platform_arch"
-        done
-        
-        # Remove individual binaries, keep only archives
-        find release-assets -name "smart-suggestion-*" -type f ! -name "*.tar.gz" -delete
-        
-        # Show final contents
-        echo "Final release assets:"
-        ls -la release-assets/
-
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-        name: Release ${{ github.event.inputs.tag || github.ref_name }}
-        draft: false
-        prerelease: false
-        files: |
-          release-assets/*.tar.gz
-          install.sh
-        body: |
-          ## Smart Suggestion Release ${{ github.event.inputs.tag || github.ref_name }}
-          
-          ### Installation
-          
-          **Quick Install (Recommended):**
-          ```bash
-          curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/${{ github.event.inputs.tag || github.ref_name }}/install.sh | bash
-          ```
-          
-          **Manual Install:**
-          1. Download the appropriate archive for your platform
-          2. Extract it to your desired location
-          3. Follow the setup instructions in the README.md
-          
-          ### Supported Platforms
-          - Linux (x86_64, ARM64)
-          - macOS (Intel, Apple Silicon)
-          - Windows (x86_64)
-          
-          ### Changes
-          See the commit history for detailed changes in this release.
-          
-          ### Requirements
-          - zsh shell
-          - zsh-autosuggestions plugin
-          - API key for OpenAI, Anthropic, or Google Gemini
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        if: github.event_name == 'push' && github.event.repository.default_branch == github.ref_name
+        with:
+          fail_on_unmatched_files: true
+          generate_release_notes: false
+          make_latest: true
+          tag_name: latest
+          files: /usr/local/bin/smart-suggestion-*
+    permissions:
+      contents: write
