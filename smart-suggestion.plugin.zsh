@@ -250,7 +250,7 @@ function smart-suggestion() {
     echo "    - SMART_SUGGESTION_DEBUG: Enable debug logging (default: false, value: $SMART_SUGGESTION_DEBUG)."
     echo "    - SMART_SUGGESTION_AUTO_UPDATE: Enable automatic update checking (default: true, value: $SMART_SUGGESTION_AUTO_UPDATE)."
     echo "    - SMART_SUGGESTION_UPDATE_INTERVAL: Days between update checks (default: 7, value: $SMART_SUGGESTION_UPDATE_INTERVAL)."
-    echo "    - SMART_SUGGESTION_BINARY: Days between update checks (value: $SMART_SUGGESTION_BINARY)."
+    echo "    - SMART_SUGGESTION_BINARY: Path to the smart-suggestion binary (value: $SMART_SUGGESTION_BINARY)."
 }
 
 zle -N _do_smart_suggestion

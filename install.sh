@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 REPO_URL="https://github.com/yetone/smart-suggestion"
 LATEST_RELEASE_URL="https://api.github.com/repos/yetone/smart-suggestion/releases/latest"
 INSTALL_DIR="$HOME/.config/smart-suggestion"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/smart-suggestion"
 PLUGIN_FILE="smart-suggestion.plugin.zsh"
 
 # Helper functions
@@ -203,6 +204,7 @@ install_smart_suggestion() {
 
     # Create install directory
     mkdir -p "$INSTALL_DIR"
+    mkdir -p "$CONFIG_DIR"
 
     # Download and extract
     local temp_archive="${TMPDIR:-/tmp}/smart-suggestion-$platform.tar.gz"
@@ -291,13 +293,15 @@ show_post_install_instructions() {
     echo ""
     echo -e "${BLUE}Next steps:${NC}"
     echo "1. Set up your AI provider API key:"
-    echo -e "   ${YELLOW}export OPENAI_API_KEY=\"your-api-key\"${NC}                        # For OpenAI"
-    echo -e "   ${YELLOW}export AZURE_OPENAI_API_KEY=\"your-api-key\"${NC}                  # For Azure OpenAI"
-    echo -e "   ${YELLOW}export AZURE_OPENAI_RESOURCE_NAME=\"your-resource-name\"${NC}      # For Azure OpenAI"
-    echo -e "   ${YELLOW}export AZURE_OPENAI_DEPLOYMENT_NAME=\"your-deployment-name\"${NC}  # For Azure OpenAI"
-    echo -e "   ${YELLOW}export ANTHROPIC_API_KEY=\"your-api-key\"${NC}                     # For Anthropic"
-    echo -e "   ${YELLOW}export GEMINI_API_KEY=\"your-api-key\"${NC}                        # For Google Gemini"
-    echo -e "   ${YELLOW}export DEEPSEEK_API_KEY=\"your-api-key\"${NC}                      # For DeepSeek"
+    echo -e "   Edit ${YELLOW}$CONFIG_DIR/config.zsh${NC} and add your API key (no export needed):"
+    echo ""
+    echo -e "   ${YELLOW}OPENAI_API_KEY=\"your-api-key\"${NC}                        # For OpenAI"
+    echo -e "   ${YELLOW}AZURE_OPENAI_API_KEY=\"your-api-key\"${NC}                  # For Azure OpenAI"
+    echo -e "   ${YELLOW}AZURE_OPENAI_RESOURCE_NAME=\"your-resource-name\"${NC}      # For Azure OpenAI"
+    echo -e "   ${YELLOW}AZURE_OPENAI_DEPLOYMENT_NAME=\"your-deployment-name\"${NC}  # For Azure OpenAI"
+    echo -e "   ${YELLOW}ANTHROPIC_API_KEY=\"your-api-key\"${NC}                     # For Anthropic"
+    echo -e "   ${YELLOW}GEMINI_API_KEY=\"your-api-key\"${NC}                        # For Google Gemini"
+    echo -e "   ${YELLOW}DEEPSEEK_API_KEY=\"your-api-key\"${NC}                      # For DeepSeek"
     echo ""
     echo "2. Reload your shell:"
     echo -e "   ${YELLOW}source ~/.zshrc${NC}"

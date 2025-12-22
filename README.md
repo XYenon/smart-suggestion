@@ -48,7 +48,7 @@ This script will:
 
 - Detect your platform (Linux, macOS, Windows)
 - Download the appropriate pre-built binary
-- Install the plugin to `~/.config/smart-suggestion`
+- Install the plugin to its installation directory (e.g., `~/.config/smart-suggestion` or `${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/smart-suggestion` if Oh My Zsh is detected)
 - Configure your `~/.zshrc` automatically with proxy mode enabled by default
 - Check for zsh-autosuggestions dependency
 
@@ -155,45 +155,53 @@ source ~/.zshrc
 
 ### AI Provider Setup
 
-You need an API key for at least one of the supported AI providers:
+The recommended way to configure smart-suggestion is by creating a `config.zsh` file in your configuration directory (default: `~/.config/smart-suggestion/config.zsh`).
+
+> [!TIP]
+> Variables defined in `config.zsh` do not need `export`.
 
 #### OpenAI (default)
 
 ```bash
-export OPENAI_API_KEY="your-openai-api-key"
+# ~/.config/smart-suggestion/config.zsh
+OPENAI_API_KEY="your-openai-api-key"
 ```
 
 #### Azure OpenAI
 
 ```bash
-export AZURE_OPENAI_API_KEY="your-azure-openai-api-key" # i.e. c0123456789012345678901234567890
-export AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp when your endpoint is https://awesome-corp.openai.azure.com
-export AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-4o
-export AZURE_OPENAI_API_VERSION="2024-10-21"  # Optional, defaults to 2024-10-21
-export AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
+# ~/.config/smart-suggestion/config.zsh
+AZURE_OPENAI_API_KEY="your-azure-openai-api-key" # i.e. c0123456789012345678901234567890
+AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp when your endpoint is https://awesome-corp.openai.azure.com
+AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-4o
+AZURE_OPENAI_API_VERSION="2024-10-21"  # Optional, defaults to 2024-10-21
+AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
 ```
 
 #### Anthropic Claude
 
 ```bash
-export ANTHROPIC_API_KEY="your-anthropic-api-key"
+# ~/.config/smart-suggestion/config.zsh
+ANTHROPIC_API_KEY="your-anthropic-api-key"
 ```
 
 #### Google Gemini
 
 ```bash
-export GEMINI_API_KEY="your-gemini-api-key"
+# ~/.config/smart-suggestion/config.zsh
+GEMINI_API_KEY="your-gemini-api-key"
 ```
 
 #### DeepSeek
 
 ```bash
-export DEEPSEEK_API_KEY="your-deepseek-api-key"
+# ~/.config/smart-suggestion/config.zsh
+DEEPSEEK_API_KEY="your-deepseek-api-key"
 ```
 
 ### Environment Variables
 
-Configure the plugin behavior with these environment variables:
+Alternatively, you can configure the plugin using global environment variables in your `.zshrc` (requires `export`).
 
 | Variable                           | Description                           | Default       | Options                                                     |
 |------------------------------------|---------------------------------------|---------------|-------------------------------------------------------------|
@@ -217,23 +225,28 @@ If `SMART_SUGGESTION_BINARY` is not specified, we look for one in the following 
 #### Custom API URLs
 
 ```bash
-export OPENAI_BASE_URL="your-custom-openai-endpoint.com"
-export AZURE_OPENAI_BASE_URL="your-custom-azure-openai-endpoint.com"
-export ANTHROPIC_BASE_URL="your-custom-anthropic-endpoint.com"
-export GEMINI_BASE_URL="your-custom-gemini-endpoint.com"
-export DEEPSEEK_BASE_URL="your-custom-deepseek-endpoint.com"
+# ~/.config/smart-suggestion/config.zsh
+OPENAI_BASE_URL="your-custom-openai-endpoint.com"
+AZURE_OPENAI_BASE_URL="your-custom-azure-openai-endpoint.com"
+ANTHROPIC_BASE_URL="your-custom-anthropic-endpoint.com"
+GEMINI_BASE_URL="your-custom-gemini-endpoint.com"
+DEEPSEEK_BASE_URL="your-custom-deepseek-endpoint.com"
 ```
 
 #### Custom Models
 
 ```bash
-export GEMINI_MODEL="gemini-1.5-pro"  # Default: gemini-1.5-flash
+# ~/.config/smart-suggestion/config.zsh
+OPENAI_MODEL="gpt-4o"          # Default: gpt-4o-mini
+ANTHROPIC_MODEL="claude-3-opus-20240229" # Default: claude-3-5-sonnet-20241022
+GEMINI_MODEL="gemini-1.5-pro"  # Default: gemini-2.5-flash
 ```
 
 #### History Lines for Context
 
 ```bash
-export SMART_SUGGESTION_HISTORY_LINES="20"  # Default: 10
+# ~/.config/smart-suggestion/config.zsh
+SMART_SUGGESTION_HISTORY_LINES="20"  # Default: 10
 ```
 
 ### View Current Configuration
@@ -275,7 +288,8 @@ Smart Suggestion now automatically enables **proxy mode** by default, which prov
 You can disable proxy mode if needed:
 
 ```bash
-export SMART_SUGGESTION_PROXY_MODE=false
+# ~/.config/smart-suggestion/config.zsh
+SMART_SUGGESTION_PROXY_MODE=false
 ```
 
 For advanced proxy configuration, see [PROXY_USAGE.md](PROXY_USAGE.md).
@@ -287,7 +301,8 @@ For advanced proxy configuration, see [PROXY_USAGE.md](PROXY_USAGE.md).
 Enable debug logging to troubleshoot issues:
 
 ```bash
-export SMART_SUGGESTION_DEBUG=true
+# ~/.config/smart-suggestion/config.zsh
+SMART_SUGGESTION_DEBUG=true
 ```
 
 Debug logs are written to `~/.cache/smart-suggestion/debug.log`.
