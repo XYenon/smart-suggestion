@@ -15,6 +15,8 @@ import (
 	"github.com/yetone/smart-suggestion/internal/session"
 )
 
+var execCommand = exec.Command
+
 func BuildContextInfo() (string, error) {
 	var parts []string
 
@@ -68,7 +70,7 @@ func BuildContextInfo() (string, error) {
 
 func getSystemInfo() string {
 	if runtime.GOOS == "darwin" {
-		out, err := exec.Command("sw_vers").Output()
+		out, err := execCommand("sw_vers").Output()
 		if err != nil {
 			return "Your system is macOS."
 		}
@@ -100,7 +102,7 @@ func getSystemInfo() string {
 }
 
 func getUserID() string {
-	out, err := exec.Command("id").Output()
+	out, err := execCommand("id").Output()
 	if err != nil {
 		return "unknown"
 	}
@@ -108,7 +110,7 @@ func getUserID() string {
 }
 
 func getUnameInfo() string {
-	out, err := exec.Command("uname", "-a").Output()
+	out, err := execCommand("uname", "-a").Output()
 	if err != nil {
 		return "unknown"
 	}
@@ -143,7 +145,7 @@ func doGetShellBuffer() (string, error) {
 	defaultProxyLogFile := paths.GetDefaultProxyLogFile()
 
 	if os.Getenv("TMUX") != "" {
-		cmd := exec.Command("tmux", "capture-pane", "-pS", "-")
+		cmd := execCommand("tmux", "capture-pane", "-pS", "-")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output)), nil
@@ -152,7 +154,7 @@ func doGetShellBuffer() (string, error) {
 	}
 
 	if os.Getenv("KITTY_LISTEN_ON") != "" {
-		cmd := exec.Command("kitten", "@", "get-text", "--extent", "all")
+		cmd := execCommand("kitten", "@", "get-text", "--extent", "all")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output)), nil
@@ -235,7 +237,7 @@ func getScreenBuffer() (string, error) {
 	}
 
 	screenBufferFile := filepath.Join(os.TempDir(), "screen_buffer.txt")
-	cmd := exec.Command("screen", "-X", "hardcopy", screenBufferFile)
+	cmd := execCommand("screen", "-X", "hardcopy", screenBufferFile)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to capture screen buffer: %w", err)
 	}
@@ -251,7 +253,7 @@ func getScreenBuffer() (string, error) {
 }
 
 func getTerminalBufferWithTput() (string, error) {
-	rowsCmd := exec.Command("tput", "lines")
+	rowsCmd := execCommand("tput", "lines")
 	rowsOutput, err := rowsCmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get terminal rows: %w", err)

@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+var osExecutable = os.Executable
+
 type GitHubRelease struct {
 	TagName string `json:"tag_name"`
 	Assets  []struct {
@@ -22,12 +24,14 @@ type GitHubRelease struct {
 	} `json:"assets"`
 }
 
+var githubAPIURL = "https://api.github.com/repos/yetone/smart-suggestion/releases/latest"
+
 func CheckUpdate(currentVersion string) (string, string, error) {
 	if currentVersion == "dev" {
 		return "", "", fmt.Errorf("cannot update development version. Please install from releases")
 	}
 
-	resp, err := http.Get("https://api.github.com/repos/yetone/smart-suggestion/releases/latest")
+	resp, err := http.Get(githubAPIURL)
 	if err != nil {
 		return "", "", err
 	}
@@ -75,7 +79,7 @@ func InstallUpdate(downloadURL string) error {
 		return err
 	}
 
-	currentBinary, err := os.Executable()
+	currentBinary, err := osExecutable()
 	if err != nil {
 		return err
 	}

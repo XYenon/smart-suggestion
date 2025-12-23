@@ -20,6 +20,8 @@ func GetCurrentSessionID() string {
 	return fmt.Sprintf("pid_%d", os.Getpid())
 }
 
+var execCommand = exec.Command
+
 func GetTTYName() string {
 	if tty := os.Getenv("TTY"); tty != "" {
 		if parts := strings.Split(tty, "/"); len(parts) > 0 {
@@ -27,7 +29,7 @@ func GetTTYName() string {
 		}
 	}
 
-	cmd := exec.Command("tty")
+	cmd := execCommand("tty")
 	output, err := cmd.Output()
 	if err == nil {
 		ttyPath := strings.TrimSpace(string(output))

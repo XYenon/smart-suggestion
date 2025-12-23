@@ -1,49 +1,19 @@
 package provider
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
-	"strings"
-	"time"
 
+	"github.com/google/generative-ai-go/genai"
 	"github.com/yetone/smart-suggestion/internal/debug"
+	"google.golang.org/api/option"
 )
 
-type GeminiPart struct {
-	Text string `json:"text"`
-}
-
-type GeminiContent struct {
-	Parts []GeminiPart `json:"parts"`
-	Role  string       `json:"role"`
-}
-
-type GeminiRequest struct {
-	Contents []GeminiContent `json:"contents"`
-}
-
-type GeminiCandidate struct {
-	Content GeminiContent `json:"content"`
-}
-
-type GeminiResponse struct {
-	Candidates []GeminiCandidate `json:"candidates"`
-	Error      *GeminiError      `json:"error,omitempty"`
-}
-
-type GeminiError struct {
-	Message string `json:"message"`
-	Code    int    `json:"code"`
-}
-
 type GeminiProvider struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+	Model  string
+	Client *genai.Client
 }
 
 func NewGeminiProvider() (*GeminiProvider, error) {
@@ -52,9 +22,18 @@ func NewGeminiProvider() (*GeminiProvider, error) {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 	}
 
+	ctx := context.Background()
+	var options []option.ClientOption
+	options = append(options, option.WithAPIKey(apiKey))
+
 	baseURL := os.Getenv("GEMINI_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://generativelanguage.googleapis.com"
+	if baseURL != "" {
+		options = append(options, option.WithEndpoint(baseURL))
+	}
+
+	client, err := genai.NewClient(ctx, options...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gemini client: %w", err)
 	}
 
 	model := os.Getenv("GEMINI_MODEL")
@@ -63,96 +42,46 @@ func NewGeminiProvider() (*GeminiProvider, error) {
 	}
 
 	return &GeminiProvider{
-		APIKey:  apiKey,
-		BaseURL: baseURL,
-		Model:   model,
+		Model:  model,
+		Client: client,
 	}, nil
 }
 
-func (p *GeminiProvider) Fetch(input string, systemPrompt string) (string, error) {
-	var url string
-	baseURL := strings.TrimSuffix(p.BaseURL, "/")
-	if strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://") {
-		url = fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", baseURL, p.Model, p.APIKey)
-	} else {
-		url = fmt.Sprintf("https://%s/v1beta/models/%s:generateContent?key=%s", baseURL, p.Model, p.APIKey)
-	}
-
-	var contents []GeminiContent
-	if systemPrompt != "" {
-		contents = append(contents, GeminiContent{
-			Parts: []GeminiPart{{Text: systemPrompt}},
-			Role:  "user",
-		})
-		contents = append(contents, GeminiContent{
-			Parts: []GeminiPart{{Text: "I understand. I'll follow these instructions."}},
-			Role:  "model",
-		})
-	}
-
-	contents = append(contents, GeminiContent{
-		Parts: []GeminiPart{{Text: input}},
-		Role:  "user",
-	})
-
-	request := GeminiRequest{
-		Contents: contents,
-	}
-
-	jsonData, err := json.Marshal(request)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
+func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
 	debug.Log("Sending Gemini request", map[string]any{
-		"url":     url,
-		"request": string(jsonData),
+		"model": p.Model,
 	})
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+	model := p.Client.GenerativeModel(p.Model)
+
+	if systemPrompt != "" {
+		model.SystemInstruction = &genai.Content{
+			Parts: []genai.Part{genai.Text(systemPrompt)},
+		}
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := model.GenerateContent(ctx, genai.Text(input))
 	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
 
+	rawResp, _ := json.Marshal(resp)
 	debug.Log("Received Gemini response", map[string]any{
-		"status":   resp.Status,
-		"response": string(body),
+		"response": string(rawResp),
 	})
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var response GeminiResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if response.Error != nil {
-		return "", fmt.Errorf("Gemini API error: %s", response.Error.Message)
-	}
-
-	if len(response.Candidates) == 0 {
+	if len(resp.Candidates) == 0 {
 		return "", fmt.Errorf("no candidates returned from Gemini API")
 	}
 
-	if len(response.Candidates[0].Content.Parts) == 0 {
+	if resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
 		return "", fmt.Errorf("no content parts returned from Gemini API")
 	}
 
-	return response.Candidates[0].Content.Parts[0].Text, nil
+	part := resp.Candidates[0].Content.Parts[0]
+	if text, ok := part.(genai.Text); ok {
+		return string(text), nil
+	}
+
+	return "", fmt.Errorf("unexpected part type from Gemini API")
 }

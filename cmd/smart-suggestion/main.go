@@ -173,7 +173,7 @@ func main() {
 		Run:   runSuggest,
 	}
 
-	rootCmd.Flags().StringVarP(&providerName, "provider", "p", "", "AI provider (openai, azure_openai, anthropic, gemini, or deepseek)")
+	rootCmd.Flags().StringVarP(&providerName, "provider", "p", "", "AI provider (openai, azure_openai, anthropic, gemini)")
 	rootCmd.Flags().StringVarP(&input, "input", "i", "", "User input")
 	rootCmd.Flags().StringVarP(&systemPrompt, "system", "s", "", "System prompt (optional, uses default if not provided)")
 	rootCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
@@ -264,10 +264,8 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		p, err = provider.NewAnthropicProvider()
 	case "gemini":
 		p, err = provider.NewGeminiProvider()
-	case "deepseek":
-		p, err = provider.NewDeepSeekProvider()
 	default:
-		err = fmt.Errorf("unsupported provider: %s (valid: openai, azure_openai, anthropic, gemini, deepseek)", providerName)
+		err = fmt.Errorf("unsupported provider: %s (valid: openai, azure_openai, anthropic, gemini)", providerName)
 	}
 
 	if err != nil {
@@ -284,7 +282,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	suggestion, err := p.Fetch(input, completePrompt)
+	suggestion, err := p.Fetch(cmd.Context(), input, completePrompt)
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
 			"error":    err.Error(),

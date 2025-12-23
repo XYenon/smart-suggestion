@@ -265,7 +265,7 @@ func ParseSizeString(sizeStr string) (int64, error) {
 		numStr = sizeStr
 	}
 
-	num, err := strconv.ParseInt(numStr, 10, 64)
+	num, err := strconv.ParseInt(strings.TrimSpace(numStr), 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid size format: %s", sizeStr)
 	}

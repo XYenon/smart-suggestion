@@ -1,22 +1,20 @@
 package provider
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
 	"github.com/yetone/smart-suggestion/internal/debug"
 )
 
 type OpenAIProvider struct {
-	APIKey  string
-	BaseURL string
-	Model   string
+	Model  string
+	Client *openai.Client
 }
 
 func NewOpenAIProvider() (*OpenAIProvider, error) {
@@ -25,9 +23,17 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
 	}
 
+	options := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+
 	baseURL := os.Getenv("OPENAI_BASE_URL")
-	if baseURL == "" {
-		baseURL = "https://api.openai.com"
+	if baseURL != "" {
+		baseURL = strings.TrimSuffix(baseURL, "/")
+		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
+			baseURL = "https://" + baseURL
+		}
+		options = append(options, option.WithBaseURL(baseURL))
 	}
 
 	model := os.Getenv("OPENAI_MODEL")
@@ -35,81 +41,42 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 		model = "gpt-4o-mini"
 	}
 
+	client := openai.NewClient(options...)
+
 	return &OpenAIProvider{
-		APIKey:  apiKey,
-		BaseURL: baseURL,
-		Model:   model,
+		Model:  model,
+		Client: &client,
 	}, nil
 }
 
-func (p *OpenAIProvider) Fetch(input string, systemPrompt string) (string, error) {
-	var url string
-	baseURL := strings.TrimSuffix(p.BaseURL, "/")
-	if strings.HasPrefix(baseURL, "http://") || strings.HasPrefix(baseURL, "https://") {
-		url = fmt.Sprintf("%s/chat/completions", baseURL)
-	} else {
-		url = fmt.Sprintf("https://%s/chat/completions", baseURL)
-	}
-
-	request := OpenAIRequest{
-		Model: p.Model,
-		Messages: []OpenAIMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: input},
-		},
-	}
-
-	jsonData, err := json.Marshal(request)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
+func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
 	debug.Log("Sending OpenAI request", map[string]any{
-		"url":     url,
-		"request": string(jsonData),
+		"model": p.Model,
 	})
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	resp, err := p.Client.Chat.Completions.New(
+		ctx,
+		openai.ChatCompletionNewParams{
+			Model: openai.ChatModel(p.Model),
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.SystemMessage(systemPrompt),
+				openai.UserMessage(input),
+			},
+		},
+	)
+
 	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+		return "", fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
+	rawResp, _ := json.Marshal(resp)
 	debug.Log("Received OpenAI response", map[string]any{
-		"status":   resp.Status,
-		"response": string(body),
+		"response": string(rawResp),
 	})
 
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	var response OpenAIResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-
-	if response.Error != nil {
-		return "", fmt.Errorf("OpenAI API error: %s", response.Error.Message)
-	}
-
-	if len(response.Choices) == 0 {
+	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned from OpenAI API")
 	}
 
-	return response.Choices[0].Message.Content, nil
+	return resp.Choices[0].Message.Content, nil
 }

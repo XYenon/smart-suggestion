@@ -26,7 +26,13 @@ type ProxyOptions struct {
 	SessionID string
 }
 
+var execCommand = exec.Command
+
 func RunProxy(shell string, opts ProxyOptions) error {
+	return RunProxyWithIO(shell, opts, os.Stdin, os.Stdout)
+}
+
+func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.Writer) error {
 	if os.Getenv("SMART_SUGGESTION_PROXY_ACTIVE") != "" {
 		debug.Log("Already inside a proxy session, preventing nesting", map[string]any{
 			"existing_proxy_pid": os.Getenv("SMART_SUGGESTION_PROXY_ACTIVE"),
@@ -63,7 +69,7 @@ func RunProxy(shell string, opts ProxyOptions) error {
 		"pid":        os.Getpid(),
 	})
 
-	c := exec.Command(shell)
+	c := execCommand(shell)
 	ptmx, err := pty.Start(c)
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
@@ -74,8 +80,10 @@ func RunProxy(shell string, opts ProxyOptions) error {
 	signal.Notify(ch, syscall.SIGWINCH)
 	go func() {
 		for range ch {
-			if err := pty.InheritSize(os.Stdin, ptmx); err != nil {
-				debug.Log("Error resizing pty", map[string]any{"error": err.Error()})
+			if f, ok := stdin.(*os.File); ok {
+				if err := pty.InheritSize(f, ptmx); err != nil {
+					debug.Log("Error resizing pty", map[string]any{"error": err.Error()})
+				}
 			}
 		}
 	}()
@@ -83,21 +91,19 @@ func RunProxy(shell string, opts ProxyOptions) error {
 	defer func() { signal.Stop(ch); close(ch) }()
 
 	var oldState *term.State
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		oldState, err = term.MakeRaw(int(f.Fd()))
 		if err != nil {
 			debug.Log("Failed to set raw mode", map[string]any{"error": err.Error()})
 			return fmt.Errorf("failed to set raw mode: %w", err)
 		}
 		defer func() {
 			if oldState != nil {
-				_ = term.Restore(int(os.Stdin.Fd()), oldState)
+				_ = term.Restore(int(f.Fd()), oldState)
 			}
 		}()
 	} else {
-		debug.Log("Stdin is not a terminal, skipping raw mode", map[string]any{
-			"stdin_fd": int(os.Stdin.Fd()),
-		})
+		debug.Log("Stdin is not a terminal, skipping raw mode", map[string]any{})
 	}
 
 	if _, err := os.Stat(sessionLogFile); err == nil {
@@ -116,7 +122,7 @@ func RunProxy(shell string, opts ProxyOptions) error {
 	}
 	defer logFile.Close()
 
-	teeWriter := io.MultiWriter(os.Stdout, logFile)
+	teeWriter := io.MultiWriter(stdout, logFile)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -127,7 +133,7 @@ func RunProxy(shell string, opts ProxyOptions) error {
 
 	go func() {
 		defer wg.Done()
-		_, err := io.Copy(ptmx, os.Stdin)
+		_, err := io.Copy(ptmx, stdin)
 		if err != nil {
 			debug.Log("Error copying stdin to pty", map[string]any{"error": err.Error()})
 		}
