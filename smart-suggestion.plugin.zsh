@@ -113,9 +113,10 @@ function _fetch_suggestions() {
     "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
         --input "$input" \
-        --output "${SMART_SUGGESTION_CACHE_DIR}/suggestion" \
+        --output - \
         $debug_flag \
-        $context_flag
+        $context_flag \
+        2> "${SMART_SUGGESTION_CACHE_DIR}/error"
 
     return $?
 }
@@ -155,7 +156,6 @@ function _show_loading_animation() {
 
 function _do_smart_suggestion() {
     ##### Get input
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/suggestion"
     rm -f "${SMART_SUGGESTION_CACHE_DIR}/canceled"
     rm -f "${SMART_SUGGESTION_CACHE_DIR}/error"
     local input=$(echo "${BUFFER:0:$CURSOR}" | tr '\n' ';')
@@ -163,8 +163,8 @@ function _do_smart_suggestion() {
     _zsh_autosuggest_clear
 
     ##### Fetch message
-    read < <(_fetch_suggestions & echo $!)
-    local pid=$REPLY
+    exec {OUTPUT_FD}< <(_fetch_suggestions & echo $!)
+    read pid <&$OUTPUT_FD
 
     _show_loading_animation $pid
     local response_code=$?
@@ -183,13 +183,14 @@ function _do_smart_suggestion() {
         return 1
     fi
 
-    if [[ ! -f "${SMART_SUGGESTION_CACHE_DIR}/suggestion" ]]; then
+    local message
+    read -u $OUTPUT_FD -d '' message || true
+    exec {OUTPUT_FD}<&-
+    if [[ -z "$message" ]]; then
         _zsh_autosuggest_clear
         echo $(cat "${SMART_SUGGESTION_CACHE_DIR}/error" 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
         return 1
     fi
-
-    local message=$(cat "${SMART_SUGGESTION_CACHE_DIR}/suggestion")
 
     ##### Process response
 

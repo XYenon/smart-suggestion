@@ -296,6 +296,7 @@ func TestDoGetShellBuffer_Screen(t *testing.T) {
 		if name == "screen" {
 			// Screen writes to file. The last arg is the file path.
 			argFile := arg[len(arg)-1]
+			os.MkdirAll(filepath.Dir(argFile), 0755)
 			os.WriteFile(argFile, []byte("screen buffer"), 0644)
 			return exec.Command("true")
 		}

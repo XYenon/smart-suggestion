@@ -236,7 +236,7 @@ func getScreenBuffer() (string, error) {
 		return "", fmt.Errorf("not in a screen session")
 	}
 
-	screenBufferFile := filepath.Join(os.TempDir(), "screen_buffer.txt")
+	screenBufferFile := filepath.Join(paths.GetCacheDir(), "screen_buffer.txt")
 	cmd := execCommand("screen", "-X", "hardcopy", screenBufferFile)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to capture screen buffer: %w", err)

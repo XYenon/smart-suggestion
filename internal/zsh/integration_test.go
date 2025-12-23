@@ -150,9 +150,17 @@ if [ -f "$MOCK_ERROR_FILE" ]; then
 fi
 
 if [ -f "$MOCK_RESPONSE_FILE" ]; then
-    cat "$MOCK_RESPONSE_FILE" > "$OUTPUT_FILE"
+    if [ "$OUTPUT_FILE" = "-" ]; then
+        cat "$MOCK_RESPONSE_FILE"
+    else
+        cat "$MOCK_RESPONSE_FILE" > "$OUTPUT_FILE"
+    fi
 else
-    echo "+ls" > "$OUTPUT_FILE"
+    if [ "$OUTPUT_FILE" = "-" ]; then
+        echo "+ls"
+    else
+        echo "+ls" > "$OUTPUT_FILE"
+    fi
 fi
 exit 0
 `

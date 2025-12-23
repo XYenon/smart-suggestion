@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -148,14 +147,6 @@ var (
 	logRotator *pkg.LogRotator
 )
 
-func getDefaultOutputFile() string {
-	return filepath.Join(paths.GetCacheDir(), "suggestion")
-}
-
-func getErrorFile() string {
-	return filepath.Join(paths.GetCacheDir(), "error")
-}
-
 func init() {
 	config := pkg.DefaultLogRotateConfig()
 	config.MaxSize = 5 * 1024 * 1024 // 5MB
@@ -177,7 +168,7 @@ func main() {
 	rootCmd.Flags().StringVarP(&input, "input", "i", "", "User input")
 	rootCmd.Flags().StringVarP(&systemPrompt, "system", "s", "", "System prompt (optional, uses default if not provided)")
 	rootCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
-	rootCmd.Flags().StringVarP(&outputFile, "output", "o", getDefaultOutputFile(), "Output file path")
+	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "-", "Output file path")
 	rootCmd.Flags().BoolVarP(&sendContext, "context", "c", false, "Include context information")
 
 	var proxyCmd = &cobra.Command{
@@ -275,10 +266,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 			"input":    input,
 		})
 
-		errorMsg := fmt.Sprintf("Error fetching suggestions from %s API: %v", providerName, err)
-		if err := os.WriteFile(getErrorFile(), []byte(errorMsg), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write error file: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
 		os.Exit(1)
 	}
 
@@ -290,10 +278,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 			"input":    input,
 		})
 
-		errorMsg := fmt.Sprintf("Error fetching suggestions from %s API: %v", providerName, err)
-		if err := os.WriteFile(getErrorFile(), []byte(errorMsg), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write error file: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
 		os.Exit(1)
 	}
 
@@ -306,9 +291,16 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		"parsed_suggestion": finalSuggestion,
 	})
 
-	if err := os.WriteFile(outputFile, []byte(finalSuggestion), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write suggestion to file: %v\n", err)
-		os.Exit(1)
+	if outputFile == "-" || outputFile == "/dev/stdout" {
+		if _, err := fmt.Fprint(os.Stdout, finalSuggestion); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write suggestion to stdout: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		if err := os.WriteFile(outputFile, []byte(finalSuggestion), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write suggestion to file: %v\n", err)
+			os.Exit(1)
+		}
 	}
 }
 
