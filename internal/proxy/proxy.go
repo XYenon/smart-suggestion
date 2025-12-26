@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/yetone/smart-suggestion/internal/debug"
-	"github.com/yetone/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/session"
 	"golang.org/x/term"
 )
 

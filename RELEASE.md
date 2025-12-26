@@ -56,22 +56,22 @@ The `install.sh` script provides automated installation with the following featu
 
 **Basic installation:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash
 ```
 
 **Custom installation directory:**
 ```bash
-INSTALL_DIR="$HOME/.local/share/smart-suggestion" curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash
+INSTALL_DIR="$HOME/.local/share/smart-suggestion" curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash
 ```
 
 **Uninstallation:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash -s -- --uninstall
 ```
 
 **Help:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash -s -- --help
+curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash -s -- --help
 ```
 
 ### What the installer does

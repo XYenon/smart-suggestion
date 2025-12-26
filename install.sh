@@ -13,8 +13,8 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO_URL="https://github.com/yetone/smart-suggestion"
-LATEST_RELEASE_URL="https://api.github.com/repos/yetone/smart-suggestion/releases/latest"
+REPO_URL="https://github.com/XYenon/smart-suggestion"
+LATEST_RELEASE_URL="https://api.github.com/repos/XYenon/smart-suggestion/releases/latest"
 INSTALL_DIR="$HOME/.config/smart-suggestion"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/smart-suggestion"
 PLUGIN_FILE="smart-suggestion.plugin.zsh"

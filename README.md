@@ -41,7 +41,7 @@ Make sure you have the following installed:
 The easiest way to install smart-suggestion is using our installation script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash
 ```
 
 This script will:
@@ -55,7 +55,7 @@ This script will:
 **Uninstall:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/install.sh | bash -s -- --uninstall
 ```
 
 ### Method 2: Oh My Zsh
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/main/instal
 1. Clone the repository into your Oh My Zsh custom plugins directory:
 
 ```bash
-git clone https://github.com/yetone/smart-suggestion ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/smart-suggestion
+git clone https://github.com/XYenon/smart-suggestion ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/smart-suggestion
 ```
 
 2. Add `smart-suggestion` to your plugins array in `~/.zshrc`:
@@ -92,7 +92,7 @@ source ~/.zshrc
 ```bash
 zinit as"program" atclone'./build.sh' \
     atpull'%atclone' pick"smart-suggestion" src"smart-suggestion.plugin.zsh" for \
-        yetone/smart-suggestion
+        XYenon/smart-suggestion
 ```
 
 2. Update Zinit:
@@ -106,7 +106,7 @@ zi update
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yetone/smart-suggestion ~/.config/smart-suggestion
+git clone https://github.com/XYenon/smart-suggestion ~/.config/smart-suggestion
 ```
 
 2. Build the Go binary (requires Go 1.21+):
@@ -130,7 +130,7 @@ source ~/.zshrc
 
 ### Method 5: Manual Installation from Release
 
-1. Download the latest release for your platform from [GitHub Releases](https://github.com/yetone/smart-suggestion/releases)
+1. Download the latest release for your platform from [GitHub Releases](https://github.com/XYenon/smart-suggestion/releases)
 
 2. Extract the archive:
 

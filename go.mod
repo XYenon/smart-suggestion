@@ -1,4 +1,4 @@
-module github.com/yetone/smart-suggestion
+module github.com/xyenon/smart-suggestion
 
 go 1.24.0
 

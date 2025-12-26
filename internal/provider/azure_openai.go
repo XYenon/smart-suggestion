@@ -9,7 +9,7 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/azure"
-	"github.com/yetone/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
 type AzureOpenAIProvider struct {

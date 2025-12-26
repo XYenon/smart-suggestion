@@ -7,7 +7,7 @@ import (
 	"os"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/yetone/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/debug"
 	"google.golang.org/api/option"
 )
 

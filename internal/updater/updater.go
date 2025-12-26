@@ -24,7 +24,7 @@ type GitHubRelease struct {
 	} `json:"assets"`
 }
 
-var githubAPIURL = "https://api.github.com/repos/yetone/smart-suggestion/releases/latest"
+var githubAPIURL = "https://api.github.com/repos/XYenon/smart-suggestion/releases/latest"
 
 func CheckUpdate(currentVersion string) (string, string, error) {
 	if currentVersion == "dev" {

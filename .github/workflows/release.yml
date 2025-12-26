@@ -45,7 +45,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        go-version: '1.25'
 
     - name: Get dependencies
       run: go mod download
@@ -62,7 +62,7 @@ jobs:
 
         mkdir -p dist
         go build -ldflags="-w -s -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.GitCommit=$GIT_COMMIT -X main.OS=$GOOS -X main.Arch=$GOARCH" \
-          -o dist/smart-suggestion-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} ./cmd/main.go
+          -o dist/smart-suggestion-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }} ./cmd/smart-suggestion/main.go
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -86,19 +86,19 @@ jobs:
     - name: Prepare release assets
       run: |
         mkdir -p release-assets
-        
+
         # In v4, artifacts are downloaded into subdirectories named after the artifact
         # Each artifact directory contains the binary file
         echo "Contents of dist directory:"
         find dist -type f -ls
-        
+
         # Copy binaries from artifact subdirectories to release-assets
         find dist -name "smart-suggestion-*" -type f -exec cp {} release-assets/ \;
-        
+
         # List what we copied
         echo "Contents of release-assets after copying:"
         ls -la release-assets/
-        
+
         # Create archive for each platform with plugin files
         for binary_path in release-assets/smart-suggestion-*; do
           # Skip if it's a directory or doesn't exist
@@ -106,27 +106,27 @@ jobs:
             echo "Skipping $binary_path (not a file)"
             continue
           fi
-          
+
           binary_name=$(basename "$binary_path")
           platform_arch=$(echo "$binary_name" | sed 's/smart-suggestion-//')
-          
+
           echo "Processing binary: $binary_name for platform: $platform_arch"
-          
+
           # Use a temporary directory name to avoid conflicts with binary files
           temp_dir="release-assets/temp-$platform_arch"
-          
+
           # Create platform-specific directory (remove if exists first)
           rm -rf "$temp_dir"
           mkdir -p "$temp_dir"
-          
+
           # Copy binary and make it executable
           cp "$binary_path" "$temp_dir/smart-suggestion"
           chmod +x "$temp_dir/smart-suggestion"
-          
+
           # Copy plugin files
           cp smart-suggestion.plugin.zsh "$temp_dir/"
           cp README.md "$temp_dir/"
-          
+
           # Create tar.gz archive with proper directory name
           cd release-assets
           rm -rf "smart-suggestion-$platform_arch"
@@ -134,16 +134,16 @@ jobs:
           mv "temp-$platform_arch" "smart-suggestion-$platform_arch"
           tar -czf "smart-suggestion-$platform_arch.tar.gz" "smart-suggestion-$platform_arch"
           cd ..
-          
+
           echo "Created archive: smart-suggestion-$platform_arch.tar.gz"
-          
+
           # Clean up directory
           rm -rf "release-assets/smart-suggestion-$platform_arch"
         done
-        
+
         # Remove individual binaries, keep only archives
         find release-assets -name "smart-suggestion-*" -type f ! -name "*.tar.gz" -delete
-        
+
         # Show final contents
         echo "Final release assets:"
         ls -la release-assets/
@@ -160,27 +160,27 @@ jobs:
           install.sh
         body: |
           ## Smart Suggestion Release ${{ github.event.inputs.tag || github.ref_name }}
-          
+
           ### Installation
-          
+
           **Quick Install (Recommended):**
           ```bash
-          curl -fsSL https://raw.githubusercontent.com/yetone/smart-suggestion/${{ github.event.inputs.tag || github.ref_name }}/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/${{ github.event.inputs.tag || github.ref_name }}/install.sh | bash
           ```
-          
+
           **Manual Install:**
           1. Download the appropriate archive for your platform
           2. Extract it to your desired location
           3. Follow the setup instructions in the README.md
-          
+
           ### Supported Platforms
           - Linux (x86_64, ARM64)
           - macOS (Intel, Apple Silicon)
           - Windows (x86_64)
-          
+
           ### Changes
           See the commit history for detailed changes in this release.
-          
+
           ### Requirements
           - zsh shell
           - zsh-autosuggestions plugin

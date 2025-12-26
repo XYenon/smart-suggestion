@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/yetone/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/internal/session"
 )
 
 func TestIsProcessRunning(t *testing.T) {

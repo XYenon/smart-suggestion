@@ -6,14 +6,14 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/yetone/smart-suggestion/internal/debug"
-	"github.com/yetone/smart-suggestion/internal/paths"
-	"github.com/yetone/smart-suggestion/internal/provider"
-	"github.com/yetone/smart-suggestion/internal/proxy"
-	"github.com/yetone/smart-suggestion/internal/session"
-	"github.com/yetone/smart-suggestion/internal/shellcontext"
-	"github.com/yetone/smart-suggestion/internal/updater"
-	"github.com/yetone/smart-suggestion/pkg"
+	"github.com/xyenon/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/paths"
+	"github.com/xyenon/smart-suggestion/internal/provider"
+	"github.com/xyenon/smart-suggestion/internal/proxy"
+	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/internal/shellcontext"
+	"github.com/xyenon/smart-suggestion/internal/updater"
+	"github.com/xyenon/smart-suggestion/pkg"
 )
 
 const defaultSystemPrompt = `You are a professional SRE engineer with decades of experience, proficient in all shell commands.

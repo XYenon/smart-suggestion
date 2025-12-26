@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yetone/smart-suggestion/internal/debug"
-	"github.com/yetone/smart-suggestion/internal/paths"
-	"github.com/yetone/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/paths"
+	"github.com/xyenon/smart-suggestion/internal/session"
 )
 
 var execCommand = exec.Command

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yetone/smart-suggestion/internal/paths"
+	"github.com/xyenon/smart-suggestion/internal/paths"
 )
 
 var (
