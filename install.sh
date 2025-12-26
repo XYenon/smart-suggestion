@@ -301,7 +301,6 @@ show_post_install_instructions() {
     echo -e "   ${YELLOW}AZURE_OPENAI_DEPLOYMENT_NAME=\"your-deployment-name\"${NC}  # For Azure OpenAI"
     echo -e "   ${YELLOW}ANTHROPIC_API_KEY=\"your-api-key\"${NC}                     # For Anthropic"
     echo -e "   ${YELLOW}GEMINI_API_KEY=\"your-api-key\"${NC}                        # For Google Gemini"
-    echo -e "   ${YELLOW}DEEPSEEK_API_KEY=\"your-api-key\"${NC}                      # For DeepSeek"
     echo ""
     echo "2. Reload your shell:"
     echo -e "   ${YELLOW}source ~/.zshrc${NC}"

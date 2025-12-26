@@ -4,7 +4,7 @@
 >
 > This project is a fork of [zsh-copilot](https://github.com/Myzel394/zsh-copilot) by [Myzel394](https://github.com/Myzel394).
 
-Get AI-powered command suggestions **directly** in your zsh shell. No complex setup, no external tools - just press `CTRL + O` and get intelligent command suggestions powered by OpenAI, Anthropic Claude, Google Gemini, or DeepSeek.
+Get AI-powered command suggestions **directly** in your zsh shell. No complex setup, no external tools - just press `CTRL + O` and get intelligent command suggestions powered by OpenAI, Anthropic Claude, or Google Gemini.
 
 > [!NOTE]
 >
@@ -17,7 +17,7 @@ Get AI-powered command suggestions **directly** in your zsh shell. No complex se
 ## Features
 
 - **🚀 Context-aware intelligent prediction**: Predicts the next command you are likely to input based on context (history, aliases, terminal buffer)
-- **🤖 Multiple AI Providers**: Support for OpenAI GPT, Anthropic Claude, Google Gemini, and DeepSeek
+- **🤖 Multiple AI Providers**: Support for OpenAI GPT, Anthropic Claude, and Google Gemini
 - **🔧 Highly Configurable**: Customize keybindings, AI provider, context sharing, and more
 
 ## Questions
@@ -192,20 +192,13 @@ ANTHROPIC_API_KEY="your-anthropic-api-key"
 GEMINI_API_KEY="your-gemini-api-key"
 ```
 
-#### DeepSeek
-
-```bash
-# ~/.config/smart-suggestion/config.zsh
-DEEPSEEK_API_KEY="your-deepseek-api-key"
-```
-
 ### Environment Variables
 
 Alternatively, you can configure the plugin using global environment variables in your `.zshrc` (requires `export`).
 
 | Variable                           | Description                           | Default       | Options                                                     |
 |------------------------------------|---------------------------------------|---------------|-------------------------------------------------------------|
-| `SMART_SUGGESTION_AI_PROVIDER`     | AI provider to use                    | Auto-detected | `openai`, `azure_openai`, `anthropic`, `gemini`, `deepseek` |
+| `SMART_SUGGESTION_AI_PROVIDER`     | AI provider to use                    | Auto-detected | `openai`, `azure_openai`, `anthropic`, `gemini`             |
 | `SMART_SUGGESTION_KEY`             | Keybinding to trigger suggestions     | `^o`          | Any zsh keybinding                                          |
 | `SMART_SUGGESTION_SEND_CONTEXT`    | Send shell context to AI              | `true`        | `true`, `false`                                             |
 | `SMART_SUGGESTION_PROXY_MODE`      | Enable proxy mode for better context  | `true`        | `true`, `false`                                             |
@@ -230,7 +223,6 @@ OPENAI_BASE_URL="your-custom-openai-endpoint.com"
 AZURE_OPENAI_BASE_URL="your-custom-azure-openai-endpoint.com"
 ANTHROPIC_BASE_URL="your-custom-anthropic-endpoint.com"
 GEMINI_BASE_URL="your-custom-gemini-endpoint.com"
-DEEPSEEK_BASE_URL="your-custom-deepseek-endpoint.com"
 ```
 
 #### Custom Models
