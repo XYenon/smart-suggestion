@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -51,7 +50,9 @@ func NewAnthropicProvider() (*AnthropicProvider, error) {
 
 func (p *AnthropicProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
 	debug.Log("Sending Anthropic request", map[string]any{
-		"model": p.Model,
+		"model":         p.Model,
+		"system_prompt": systemPrompt,
+		"input":         input,
 	})
 
 	resp, err := p.Client.Messages.New(
@@ -74,9 +75,8 @@ func (p *AnthropicProvider) Fetch(ctx context.Context, input string, systemPromp
 		return "", fmt.Errorf("failed to create message: %w", err)
 	}
 
-	rawResp, _ := json.Marshal(resp)
 	debug.Log("Received Anthropic response", map[string]any{
-		"response": string(rawResp),
+		"response": resp,
 	})
 
 	if len(resp.Content) == 0 {

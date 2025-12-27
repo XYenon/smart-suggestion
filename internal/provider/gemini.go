@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -49,7 +48,9 @@ func NewGeminiProvider() (*GeminiProvider, error) {
 
 func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
 	debug.Log("Sending Gemini request", map[string]any{
-		"model": p.Model,
+		"model":         p.Model,
+		"system_prompt": systemPrompt,
+		"input":         input,
 	})
 
 	model := p.Client.GenerativeModel(p.Model)
@@ -65,9 +66,8 @@ func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt s
 		return "", fmt.Errorf("failed to generate content: %w", err)
 	}
 
-	rawResp, _ := json.Marshal(resp)
 	debug.Log("Received Gemini response", map[string]any{
-		"response": string(rawResp),
+		"response": resp,
 	})
 
 	if len(resp.Candidates) == 0 {

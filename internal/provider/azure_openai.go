@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -63,7 +62,9 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 
 func (p *AzureOpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
 	debug.Log("Sending Azure OpenAI request", map[string]any{
-		"deployment": p.DeploymentName,
+		"deployment":    p.DeploymentName,
+		"system_prompt": systemPrompt,
+		"input":         input,
 	})
 
 	resp, err := p.Client.Chat.Completions.New(
@@ -81,9 +82,8 @@ func (p *AzureOpenAIProvider) Fetch(ctx context.Context, input string, systemPro
 		return "", fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
-	rawResp, _ := json.Marshal(resp)
 	debug.Log("Received Azure OpenAI response", map[string]any{
-		"response": string(rawResp),
+		"response": resp,
 	})
 
 	if len(resp.Choices) == 0 {
