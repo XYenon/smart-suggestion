@@ -341,3 +341,197 @@ func TestRunProxy_PTYError(t *testing.T) {
 		t.Error("expected error for non-existent shell, got nil")
 	}
 }
+
+func TestLineLimitedWriter_Basic(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "test.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 3)
+
+	// Write 5 lines
+	for i := 1; i <= 5; i++ {
+		_, err := w.Write([]byte("line" + strconv.Itoa(i) + "\n"))
+		if err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+	}
+
+	// Read file content
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("failed to read log file: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Errorf("expected 3 lines, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "line3" {
+		t.Errorf("expected first line to be line3, got %s", lines[0])
+	}
+	if lines[2] != "line5" {
+		t.Errorf("expected last line to be line5, got %s", lines[2])
+	}
+}
+
+func TestLineLimitedWriter_PartialWrites(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "partial.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 2)
+
+	// Write partial data (no newline yet)
+	w.Write([]byte("hel"))
+	w.Write([]byte("lo"))
+	w.Write([]byte("\n"))
+	w.Write([]byte("wor"))
+	w.Write([]byte("ld\n"))
+
+	content, _ := os.ReadFile(logPath)
+	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Errorf("expected 2 lines, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "hello" {
+		t.Errorf("expected 'hello', got %s", lines[0])
+	}
+	if lines[1] != "world" {
+		t.Errorf("expected 'world', got %s", lines[1])
+	}
+}
+
+func TestLineLimitedWriter_NoNewline(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "nonewline.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 5)
+
+	// Write data without newline - should be buffered
+	w.Write([]byte("no newline yet"))
+
+	content, _ := os.ReadFile(logPath)
+	if len(content) != 0 {
+		t.Errorf("expected empty file (data buffered), got %s", string(content))
+	}
+
+	// Now add the newline
+	w.Write([]byte("\n"))
+	content, _ = os.ReadFile(logPath)
+	if string(content) != "no newline yet\n" {
+		t.Errorf("expected 'no newline yet\\n', got %s", string(content))
+	}
+}
+
+func TestLineLimitedWriter_ExactLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "exact.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 3)
+
+	// Write exactly 3 lines
+	w.Write([]byte("a\nb\nc\n"))
+
+	content, _ := os.ReadFile(logPath)
+	expected := "a\nb\nc\n"
+	if string(content) != expected {
+		t.Errorf("expected %q, got %q", expected, string(content))
+	}
+
+	// Add one more line - oldest should be removed
+	w.Write([]byte("d\n"))
+	content, _ = os.ReadFile(logPath)
+	expected = "b\nc\nd\n"
+	if string(content) != expected {
+		t.Errorf("expected %q, got %q", expected, string(content))
+	}
+}
+
+func TestLineLimitedWriter_MultipleNewlinesInOneWrite(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "multi.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 2)
+
+	// Write multiple lines at once
+	w.Write([]byte("line1\nline2\nline3\nline4\n"))
+
+	content, _ := os.ReadFile(logPath)
+	expected := "line3\nline4\n"
+	if string(content) != expected {
+		t.Errorf("expected %q, got %q", expected, string(content))
+	}
+}
+
+func TestLineLimitedWriter_EmptyWrite(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "empty.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 5)
+
+	n, err := w.Write([]byte{})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 bytes written, got %d", n)
+	}
+}
+
+func TestLineLimitedWriter_SingleLine(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "single.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 1)
+
+	w.Write([]byte("first\n"))
+	w.Write([]byte("second\n"))
+	w.Write([]byte("third\n"))
+
+	content, _ := os.ReadFile(logPath)
+	expected := "third\n"
+	if string(content) != expected {
+		t.Errorf("expected %q, got %q", expected, string(content))
+	}
+}

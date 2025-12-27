@@ -22,8 +22,9 @@ import (
 )
 
 type ProxyOptions struct {
-	LogFile   string
-	SessionID string
+	LogFile     string
+	SessionID   string
+	BufferLines int
 }
 
 var execCommand = exec.Command
@@ -122,7 +123,13 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	}
 	defer logFile.Close()
 
-	teeWriter := io.MultiWriter(stdout, logFile)
+	bufferLines := opts.BufferLines
+	if bufferLines <= 0 {
+		bufferLines = 100
+	}
+	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, bufferLines)
+
+	teeWriter := io.MultiWriter(stdout, limitedLogWriter)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -297,5 +304,72 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 		}
 	}
 
+	return nil
+}
+
+type lineLimitedWriter struct {
+	file     *os.File
+	filePath string
+	maxLines int
+	lines    []string
+	buf      []byte
+	mu       sync.Mutex
+}
+
+func newLineLimitedWriter(file *os.File, filePath string, maxLines int) *lineLimitedWriter {
+	return &lineLimitedWriter{
+		file:     file,
+		filePath: filePath,
+		maxLines: maxLines,
+		lines:    make([]string, 0, maxLines),
+	}
+}
+
+func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	w.buf = append(w.buf, p...)
+
+	for {
+		idx := -1
+		for i, b := range w.buf {
+			if b == '\n' {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			break
+		}
+
+		line := string(w.buf[:idx+1])
+		w.buf = w.buf[idx+1:]
+
+		w.lines = append(w.lines, line)
+		if len(w.lines) > w.maxLines {
+			w.lines = w.lines[1:]
+		}
+	}
+
+	if err := w.flush(); err != nil {
+		return len(p), err
+	}
+
+	return len(p), nil
+}
+
+func (w *lineLimitedWriter) flush() error {
+	if err := w.file.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := w.file.Seek(0, 0); err != nil {
+		return err
+	}
+	for _, line := range w.lines {
+		if _, err := w.file.WriteString(line); err != nil {
+			return err
+		}
+	}
 	return nil
 }

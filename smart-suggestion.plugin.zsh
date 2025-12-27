@@ -17,6 +17,12 @@ fi
 (( ! ${+SMART_SUGGESTION_DEBUG} )) &&
     typeset -g SMART_SUGGESTION_DEBUG=false
 
+(( ! ${+SMART_SUGGESTION_HISTORY_LINES} )) &&
+    typeset -g SMART_SUGGESTION_HISTORY_LINES=10
+
+(( ! ${+SMART_SUGGESTION_BUFFER_LINES} )) &&
+    typeset -g SMART_SUGGESTION_BUFFER_LINES=100
+
 # Proxy mode configuration - now enabled by default
 (( ! ${+SMART_SUGGESTION_PROXY_MODE} )) &&
     typeset -g SMART_SUGGESTION_PROXY_MODE=true
@@ -78,7 +84,7 @@ fi
 
 function _run_smart_suggestion_proxy() {
     if [[ $- == *i* ]]; then
-        "$SMART_SUGGESTION_BINARY" proxy
+        "$SMART_SUGGESTION_BINARY" proxy --buffer-lines "$SMART_SUGGESTION_BUFFER_LINES"
     fi
 }
 
@@ -104,8 +110,7 @@ function _fetch_suggestions() {
 
     # Capture shell context to avoid spawning interactive shells in Go binary
     local shell_aliases=$(alias 2>/dev/null)
-    local history_lines="${SMART_SUGGESTION_HISTORY_LINES:-10}"
-    local shell_history=$(fc -ln -$history_lines 2>/dev/null)
+    local shell_history=$(fc -ln -$SMART_SUGGESTION_HISTORY_LINES 2>/dev/null)
 
     # Call the Go binary with proper arguments
     SMART_SUGGESTION_ALIASES="$shell_aliases" \
@@ -114,6 +119,7 @@ function _fetch_suggestions() {
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
         --input "$input" \
         --output - \
+        --buffer-lines "$SMART_SUGGESTION_BUFFER_LINES" \
         $debug_flag \
         $context_flag \
         2> "${SMART_SUGGESTION_CACHE_DIR}/error"
@@ -247,6 +253,8 @@ function smart-suggestion() {
     echo "    - SMART_SUGGESTION_SEND_CONTEXT: If \`true\`, smart-suggestion will send context information (whoami, shell, pwd, etc.) to the AI model (default: true, value: $SMART_SUGGESTION_SEND_CONTEXT)."
     echo "    - SMART_SUGGESTION_AI_PROVIDER: AI provider to use ('openai', 'azure_openai', 'anthropic', or 'gemini', value: $SMART_SUGGESTION_AI_PROVIDER)."
     echo "    - SMART_SUGGESTION_DEBUG: Enable debug logging (default: false, value: $SMART_SUGGESTION_DEBUG)."
+    echo "    - SMART_SUGGESTION_HISTORY_LINES: Number of history lines to send (default: 10, value: $SMART_SUGGESTION_HISTORY_LINES)."
+    echo "    - SMART_SUGGESTION_BUFFER_LINES: Number of shell buffer lines to send (default: 100, value: $SMART_SUGGESTION_BUFFER_LINES)."
     echo "    - SMART_SUGGESTION_AUTO_UPDATE: Enable automatic update checking (default: true, value: $SMART_SUGGESTION_AUTO_UPDATE)."
     echo "    - SMART_SUGGESTION_UPDATE_INTERVAL: Days between update checks (default: 7, value: $SMART_SUGGESTION_UPDATE_INTERVAL)."
     echo "    - SMART_SUGGESTION_BINARY: Path to the smart-suggestion binary (value: $SMART_SUGGESTION_BINARY)."

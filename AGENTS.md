@@ -97,6 +97,14 @@ Standard Go testing is used. To run all tests:
 go test ./...
 ```
 
+To run tests with coverage:
+
+```bash
+go test -cover ./...
+```
+
+**Coverage Requirement**: Test coverage should be >= 80% for all packages.
+
 # Configuration
 
 Configuration is handled via `~/.config/smart-suggestion/config.zsh` or environment variables.

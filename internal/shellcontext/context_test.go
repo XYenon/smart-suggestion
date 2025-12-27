@@ -51,7 +51,7 @@ func TestDoGetShellBuffer_SessionLogFail(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer()
+	got, err := getShellBuffer(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -94,21 +94,21 @@ func TestReadLatestProxyContent(t *testing.T) {
 		t.Fatalf("failed to write log file: %v", err)
 	}
 
-	got, err := readLatestProxyContent(logFile)
+	got, err := readLatestProxyContent(logFile, 100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// readLatestProxyContent has a const maxLines = 50
+	// readLatestProxyContent now takes maxLines as a parameter
 	gotLines := strings.Split(got, "\n")
-	if len(gotLines) != 50 {
-		t.Errorf("expected 50 lines, got %d", len(gotLines))
+	if len(gotLines) != 60 {
+		t.Errorf("expected 60 lines (all lines since < 100), got %d", len(gotLines))
 	}
-	if gotLines[0] != "line11" {
-		t.Errorf("expected first line to be line11, got %q", gotLines[0])
+	if gotLines[0] != "line1" {
+		t.Errorf("expected first line to be line1, got %q", gotLines[0])
 	}
-	if gotLines[49] != "line60" {
-		t.Errorf("expected last line to be line60, got %q", gotLines[49])
+	if gotLines[59] != "line60" {
+		t.Errorf("expected last line to be line60, got %q", gotLines[59])
 	}
 }
 
@@ -119,7 +119,7 @@ func TestBuildContextInfo(t *testing.T) {
 	t.Setenv("SMART_SUGGESTION_ALIASES", "alias ls='ls -G'")
 	t.Setenv("SMART_SUGGESTION_HISTORY", "ls\ncd /tmp")
 
-	got, err := BuildContextInfo()
+	got, err := BuildContextInfo(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestBuildContextInfo_NoBuffer(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := BuildContextInfo()
+	got, err := BuildContextInfo(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestGetShellBuffer_ProxyLog(t *testing.T) {
 	os.MkdirAll(filepath.Dir(logPath), 0755)
 	os.WriteFile(logPath, []byte("shell buffer content"), 0644)
 
-	got, err := getShellBuffer()
+	got, err := getShellBuffer(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestDoGetShellBuffer_Tmux(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer()
+	got, err := getShellBuffer(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestDoGetShellBuffer_Kitty(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer()
+	got, err := getShellBuffer(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestDoGetShellBuffer_Screen(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer()
+	got, err := getShellBuffer(100)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestDoGetShellBuffer_Fallback(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	_, err := getShellBuffer()
+	_, err := getShellBuffer(100)
 	if err == nil {
 		t.Error("expected error for fallback, got nil")
 	} else if !strings.Contains(err.Error(), "no terminal buffer available") {

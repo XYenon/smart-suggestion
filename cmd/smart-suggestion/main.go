@@ -143,6 +143,7 @@ var (
 	sendContext  bool
 	proxyLogFile string
 	sessionID    string
+	bufferLines  int
 
 	logRotator *pkg.LogRotator
 )
@@ -170,6 +171,7 @@ func main() {
 	rootCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "-", "Output file path")
 	rootCmd.Flags().BoolVarP(&sendContext, "context", "c", false, "Include context information")
+	rootCmd.Flags().IntVar(&bufferLines, "buffer-lines", 100, "Number of shell buffer lines to send")
 
 	var proxyCmd = &cobra.Command{
 		Use:   "proxy",
@@ -179,6 +181,7 @@ func main() {
 	proxyCmd.Flags().StringVarP(&proxyLogFile, "log-file", "l", paths.GetDefaultProxyLogFile(), "Proxy log file path")
 	proxyCmd.Flags().StringVarP(&sessionID, "session-id", "", "", "Session ID for log isolation (auto-generated if not provided)")
 	proxyCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
+	proxyCmd.Flags().IntVar(&bufferLines, "buffer-lines", 100, "Number of shell buffer lines to keep in log")
 
 	var rotateCmd = &cobra.Command{
 		Use:   "rotate-logs",
@@ -233,7 +236,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 
 	completePrompt := systemPrompt
 	if sendContext {
-		contextInfo, err := shellcontext.BuildContextInfo()
+		contextInfo, err := shellcontext.BuildContextInfo(bufferLines)
 		if err != nil {
 			debug.Log("Failed to build context info", map[string]any{
 				"error": err.Error(),
@@ -322,8 +325,9 @@ func runProxy(cmd *cobra.Command, args []string) {
 	}
 
 	err := proxy.RunProxy(shell, proxy.ProxyOptions{
-		LogFile:   logFile,
-		SessionID: sessID,
+		LogFile:     logFile,
+		SessionID:   sessID,
+		BufferLines: bufferLines,
 	})
 	if err != nil {
 		fmt.Printf("Proxy error: %v\n", err)

@@ -17,7 +17,7 @@ import (
 
 var execCommand = exec.Command
 
-func BuildContextInfo() (string, error) {
+func BuildContextInfo(bufferLines int) (string, error) {
 	var parts []string
 
 	currentUser := os.Getenv("USER")
@@ -59,7 +59,7 @@ func BuildContextInfo() (string, error) {
 		debug.Log("Failed to get history", map[string]any{"error": err.Error()})
 	}
 
-	if buffer, err := getShellBuffer(); err == nil && buffer != "" {
+	if buffer, err := getShellBuffer(bufferLines); err == nil && buffer != "" {
 		parts = append(parts, "\n# Shell buffer:\n", buffer)
 	} else if err != nil {
 		debug.Log("Failed to get shell buffer", map[string]any{"error": err.Error()})
@@ -133,15 +133,15 @@ func getHistory() (string, error) {
 	return "", nil
 }
 
-func getShellBuffer() (string, error) {
-	content, err := doGetShellBuffer()
+func getShellBuffer(bufferLines int) (string, error) {
+	content, err := doGetShellBuffer(bufferLines)
 	if err != nil {
 		return "", err
 	}
-	return readLatestLines(content, 100)
+	return readLatestLines(content, bufferLines)
 }
 
-func doGetShellBuffer() (string, error) {
+func doGetShellBuffer(bufferLines int) (string, error) {
 	defaultProxyLogFile := paths.GetDefaultProxyLogFile()
 
 	if os.Getenv("TMUX") != "" {
@@ -165,7 +165,7 @@ func doGetShellBuffer() (string, error) {
 	currentSessionID := session.GetCurrentSessionID()
 	if currentSessionID != "" {
 		sessionLogFile := session.GetSessionBasedLogFile(defaultProxyLogFile, currentSessionID)
-		content, err := readLatestProxyContent(sessionLogFile)
+		content, err := readLatestProxyContent(sessionLogFile, bufferLines)
 		if err == nil {
 			return content, nil
 		}
@@ -176,7 +176,7 @@ func doGetShellBuffer() (string, error) {
 		})
 	}
 
-	content, err := readLatestProxyContent(defaultProxyLogFile)
+	content, err := readLatestProxyContent(defaultProxyLogFile, bufferLines)
 	if err == nil {
 		return content, nil
 	}
@@ -206,14 +206,13 @@ func readLatestLines(content string, maxLines int) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func readLatestProxyContent(logFile string) (string, error) {
+func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to open proxy log file: %w", err)
 	}
 	defer file.Close()
 
-	const maxLines = 50
 	scanner := bufio.NewScanner(file)
 	var lines []string
 
