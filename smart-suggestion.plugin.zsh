@@ -2,8 +2,9 @@
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 CONFIG_DIR="${XDG_CONFIG_HOME}/smart-suggestion"
-if [[ -f "${CONFIG_DIR}/config.zsh" ]]; then
-    source "${CONFIG_DIR}/config.zsh"
+CONFIG_FILE="${SMART_SUGGESTION_CONFIG:-${CONFIG_DIR}/config.zsh}"
+if [[ -f "${CONFIG_FILE}" ]]; then
+    source "${CONFIG_FILE}"
 fi
 
 # Default key binding
@@ -90,9 +91,9 @@ function _run_smart_suggestion_proxy() {
 
 function _fetch_suggestions() {
     # Source config file and export all variables
-    if [[ -f "${CONFIG_DIR}/config.zsh" ]]; then
+    if [[ -f "${CONFIG_FILE}" ]]; then
         set -a
-        source "${CONFIG_DIR}/config.zsh"
+        source "${CONFIG_FILE}"
         set +a
     fi
 
