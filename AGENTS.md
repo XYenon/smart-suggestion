@@ -117,6 +117,7 @@ Key variables:
 
 # Development Conventions
 
+- **Commit Messages**: Always write commit messages in English.
 - **System Prompt**: The system prompt in `main.go` is critical. It defines the contract between the AI and the shell. Any changes to the AI logic must ensure this contract (`=`/`+` prefixes) is maintained.
 - **Error Handling**: Errors in the binary are printed to stderr. The Zsh plugin captures stderr to show user-friendly messages.
 - **Dependencies**: Use `go mod` for dependency management.
