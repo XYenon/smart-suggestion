@@ -22,9 +22,9 @@ import (
 )
 
 type ProxyOptions struct {
-	LogFile     string
-	SessionID   string
-	BufferLines int
+	LogFile         string
+	SessionID       string
+	ScrollbackLines int
 }
 
 var execCommand = exec.Command
@@ -123,11 +123,11 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	}
 	defer logFile.Close()
 
-	bufferLines := opts.BufferLines
-	if bufferLines <= 0 {
-		bufferLines = 100
+	scrollbackLines := opts.ScrollbackLines
+	if scrollbackLines <= 0 {
+		scrollbackLines = 100
 	}
-	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, bufferLines)
+	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, scrollbackLines)
 
 	teeWriter := io.MultiWriter(stdout, limitedLogWriter)
 

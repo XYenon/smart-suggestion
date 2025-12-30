@@ -17,7 +17,7 @@ import (
 
 var execCommand = exec.Command
 
-func BuildContextInfo(bufferLines int) (string, error) {
+func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error) {
 	var parts []string
 
 	currentUser := os.Getenv("USER")
@@ -44,25 +44,25 @@ func BuildContextInfo(bufferLines int) (string, error) {
 	userID := getUserID()
 	unameInfo := getUnameInfo()
 
-	parts = append(parts, fmt.Sprintf("# Context:\nYou are user %s with id %s in directory %s. Your shell is %s and your terminal is %s running on %s. %s",
+	parts = append(parts, fmt.Sprintf("# Context:\n\nYou are user %s with id %s in directory %s. Your shell is %s and your terminal is %s running on %s. %s",
 		currentUser, userID, currentDir, shell, term, unameInfo, sysInfo))
 
 	if aliases, err := getAliases(); err == nil && aliases != "" {
-		parts = append(parts, "\n# This is the alias defined in your shell:\n", aliases)
+		parts = append(parts, "\n\n# This is the alias defined in your shell:\n\n", aliases)
 	} else if err != nil {
 		debug.Log("Failed to get aliases", map[string]any{"error": err.Error()})
 	}
 
 	if history, err := getHistory(); err == nil && history != "" {
-		parts = append(parts, "\n# Shell history:\n", history)
+		parts = append(parts, "\n\n# Shell history:\n\n", history)
 	} else if err != nil {
 		debug.Log("Failed to get history", map[string]any{"error": err.Error()})
 	}
 
-	if buffer, err := getShellBuffer(bufferLines); err == nil && buffer != "" {
-		parts = append(parts, "\n# Shell buffer:\n", buffer)
+	if scrollback, err := getScrollback(scrollbackLines, scrollbackFile); err == nil && scrollback != "" {
+		parts = append(parts, "\n\n# Scrollback:\n\n", scrollback)
 	} else if err != nil {
-		debug.Log("Failed to get shell buffer", map[string]any{"error": err.Error()})
+		debug.Log("Failed to get scrollback", map[string]any{"error": err.Error()})
 	}
 
 	return strings.Join(parts, ""), nil
@@ -133,39 +133,55 @@ func getHistory() (string, error) {
 	return "", nil
 }
 
-func getShellBuffer(bufferLines int) (string, error) {
-	content, err := doGetShellBuffer(bufferLines)
+func getScrollback(scrollbackLines int, scrollbackFile string) (string, error) {
+	content, err := doGetScrollback(scrollbackLines, scrollbackFile)
 	if err != nil {
 		return "", err
 	}
-	return readLatestLines(content, bufferLines)
+	return readLatestLines(content, scrollbackLines)
 }
 
-func doGetShellBuffer(bufferLines int) (string, error) {
+func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error) {
 	defaultProxyLogFile := paths.GetDefaultProxyLogFile()
 
+	// 1. Ghostty scrollback file (highest priority)
+	if scrollbackFile != "" {
+		content, err := os.ReadFile(scrollbackFile)
+		if err == nil {
+			debug.Log("Using scrollback file", map[string]any{"file": scrollbackFile})
+			return strings.TrimSpace(string(content)), nil
+		}
+		debug.Log("Failed to read scrollback file", map[string]any{
+			"error": err.Error(),
+			"file":  scrollbackFile,
+		})
+	}
+
+	// 2. Tmux
 	if os.Getenv("TMUX") != "" {
 		cmd := execCommand("tmux", "capture-pane", "-pS", "-")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output)), nil
 		}
-		debug.Log("Failed to get tmux buffer", map[string]any{"error": err.Error()})
+		debug.Log("Failed to get tmux scrollback", map[string]any{"error": err.Error()})
 	}
 
+	// 3. Kitty
 	if os.Getenv("KITTY_LISTEN_ON") != "" {
 		cmd := execCommand("kitten", "@", "get-text", "--extent", "all")
 		output, err := cmd.Output()
 		if err == nil {
 			return strings.TrimSpace(string(output)), nil
 		}
-		debug.Log("Failed to get kitty scrollback buffer", map[string]any{"error": err.Error()})
+		debug.Log("Failed to get kitty scrollback", map[string]any{"error": err.Error()})
 	}
 
+	// 4. Session proxy log
 	currentSessionID := session.GetCurrentSessionID()
 	if currentSessionID != "" {
 		sessionLogFile := session.GetSessionBasedLogFile(defaultProxyLogFile, currentSessionID)
-		content, err := readLatestProxyContent(sessionLogFile, bufferLines)
+		content, err := readLatestProxyContent(sessionLogFile, scrollbackLines)
 		if err == nil {
 			return content, nil
 		}
@@ -176,7 +192,8 @@ func doGetShellBuffer(bufferLines int) (string, error) {
 		})
 	}
 
-	content, err := readLatestProxyContent(defaultProxyLogFile, bufferLines)
+	// 5. Default proxy log
+	content, err := readLatestProxyContent(defaultProxyLogFile, scrollbackLines)
 	if err == nil {
 		return content, nil
 	}
@@ -185,17 +202,19 @@ func doGetShellBuffer(bufferLines int) (string, error) {
 		"file":  defaultProxyLogFile,
 	})
 
-	content, err = getScreenBuffer()
+	// 6. GNU Screen
+	content, err = getScreenScrollback()
 	if err == nil {
 		return content, nil
 	}
 
-	content, err = getTerminalBufferWithTput()
+	// 7. tput fallback
+	content, err = getTerminalScrollbackWithTput()
 	if err == nil {
 		return content, nil
 	}
 
-	return "", fmt.Errorf("no terminal buffer available - not in tmux/screen session and no proxy log found")
+	return "", fmt.Errorf("no scrollback available - not in tmux/screen session and no proxy log found")
 }
 
 func readLatestLines(content string, maxLines int) (string, error) {
@@ -230,7 +249,7 @@ func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
-func getScreenBuffer() (string, error) {
+func getScreenScrollback() (string, error) {
 	if os.Getenv("STY") == "" {
 		return "", fmt.Errorf("not in a screen session")
 	}
@@ -251,7 +270,7 @@ func getScreenBuffer() (string, error) {
 	return strings.TrimSpace(string(content)), nil
 }
 
-func getTerminalBufferWithTput() (string, error) {
+func getTerminalScrollbackWithTput() (string, error) {
 	rowsCmd := execCommand("tput", "lines")
 	rowsOutput, err := rowsCmd.Output()
 	if err != nil {

@@ -135,15 +135,16 @@ var (
 )
 
 var (
-	providerName string
-	input        string
-	systemPrompt string
-	dbg          bool
-	outputFile   string
-	sendContext  bool
-	proxyLogFile string
-	sessionID    string
-	bufferLines  int
+	providerName    string
+	input           string
+	systemPrompt    string
+	dbg             bool
+	outputFile      string
+	sendContext     bool
+	proxyLogFile    string
+	sessionID       string
+	scrollbackLines int
+	scrollbackFile  string
 
 	logRotator *pkg.LogRotator
 )
@@ -171,7 +172,8 @@ func main() {
 	rootCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "-", "Output file path")
 	rootCmd.Flags().BoolVarP(&sendContext, "context", "c", false, "Include context information")
-	rootCmd.Flags().IntVar(&bufferLines, "buffer-lines", 100, "Number of shell buffer lines to send")
+	rootCmd.Flags().IntVar(&scrollbackLines, "scrollback-lines", 100, "Number of scrollback lines to send")
+	rootCmd.Flags().StringVar(&scrollbackFile, "scrollback-file", "", "Path to scrollback file (Ghostty integration)")
 
 	var proxyCmd = &cobra.Command{
 		Use:   "proxy",
@@ -181,7 +183,7 @@ func main() {
 	proxyCmd.Flags().StringVarP(&proxyLogFile, "log-file", "l", paths.GetDefaultProxyLogFile(), "Proxy log file path")
 	proxyCmd.Flags().StringVarP(&sessionID, "session-id", "", "", "Session ID for log isolation (auto-generated if not provided)")
 	proxyCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
-	proxyCmd.Flags().IntVar(&bufferLines, "buffer-lines", 100, "Number of shell buffer lines to keep in log")
+	proxyCmd.Flags().IntVar(&scrollbackLines, "scrollback-lines", 100, "Number of scrollback lines to keep in log")
 
 	var rotateCmd = &cobra.Command{
 		Use:   "rotate-logs",
@@ -236,7 +238,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 
 	completePrompt := systemPrompt
 	if sendContext {
-		contextInfo, err := shellcontext.BuildContextInfo(bufferLines)
+		contextInfo, err := shellcontext.BuildContextInfo(scrollbackLines, scrollbackFile)
 		if err != nil {
 			debug.Log("Failed to build context info", map[string]any{
 				"error": err.Error(),
@@ -325,9 +327,9 @@ func runProxy(cmd *cobra.Command, args []string) {
 	}
 
 	err := proxy.RunProxy(shell, proxy.ProxyOptions{
-		LogFile:     logFile,
-		SessionID:   sessID,
-		BufferLines: bufferLines,
+		LogFile:         logFile,
+		SessionID:       sessID,
+		ScrollbackLines: scrollbackLines,
 	})
 	if err != nil {
 		fmt.Printf("Proxy error: %v\n", err)

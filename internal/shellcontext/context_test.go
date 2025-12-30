@@ -31,7 +31,74 @@ func TestGetSystemInfo_Error(t *testing.T) {
 	}
 }
 
-func TestDoGetShellBuffer_SessionLogFail(t *testing.T) {
+func TestGetSystemInfo_DarwinSuccess(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Skipping macOS specific test")
+	}
+
+	oldExecCommand := execCommand
+	defer func() { execCommand = oldExecCommand }()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "sw_vers" {
+			return exec.Command("echo", "ProductName: macOS\nProductVersion: 14.0")
+		}
+		return exec.Command("echo", "")
+	}
+
+	got := getSystemInfo()
+	if !strings.Contains(got, "macOS") {
+		t.Errorf("expected system info to contain macOS, got %q", got)
+	}
+}
+
+func TestGetUserID_Error(t *testing.T) {
+	oldExecCommand := execCommand
+	defer func() { execCommand = oldExecCommand }()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "id" {
+			return exec.Command("false")
+		}
+		return exec.Command("echo", "")
+	}
+
+	got := getUserID()
+	if got != "unknown" {
+		t.Errorf("expected unknown, got %q", got)
+	}
+}
+
+func TestGetTerminalScrollbackWithTput_Error(t *testing.T) {
+	oldExecCommand := execCommand
+	defer func() { execCommand = oldExecCommand }()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "tput" {
+			return exec.Command("false")
+		}
+		return exec.Command("echo", "")
+	}
+
+	_, err := getTerminalScrollbackWithTput()
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
+func TestGetScreenScrollback_NotInScreen(t *testing.T) {
+	t.Setenv("STY", "")
+
+	_, err := getScreenScrollback()
+	if err == nil {
+		t.Error("expected error when not in screen session")
+	}
+	if !strings.Contains(err.Error(), "not in a screen session") {
+		t.Errorf("expected 'not in a screen session' error, got %v", err)
+	}
+}
+
+func TestDoGetScrollback_SessionLogFail(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("KITTY_LISTEN_ON", "")
 	t.Setenv("SMART_SUGGESTION_SESSION_ID", "test-session")
@@ -51,7 +118,7 @@ func TestDoGetShellBuffer_SessionLogFail(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer(100)
+	got, err := getScrollback(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +186,7 @@ func TestBuildContextInfo(t *testing.T) {
 	t.Setenv("SMART_SUGGESTION_ALIASES", "alias ls='ls -G'")
 	t.Setenv("SMART_SUGGESTION_HISTORY", "ls\ncd /tmp")
 
-	got, err := BuildContextInfo(100)
+	got, err := BuildContextInfo(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -151,12 +218,12 @@ func TestBuildContextInfo_NoBuffer(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	got, err := BuildContextInfo(100)
+	got, err := BuildContextInfo(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(got, "# Shell buffer:") {
-		t.Error("expected no shell buffer in context")
+	if strings.Contains(got, "# Scrollback:") {
+		t.Error("expected no scrollback in context")
 	}
 }
 
@@ -215,7 +282,7 @@ func TestGetUnameInfo_Error(t *testing.T) {
 	}
 }
 
-func TestGetShellBuffer_ProxyLog(t *testing.T) {
+func TestGetScrollback_ProxyLog(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", tempDir)
 	t.Setenv("TMUX", "")
@@ -224,18 +291,18 @@ func TestGetShellBuffer_ProxyLog(t *testing.T) {
 
 	logPath := filepath.Join(tempDir, "smart-suggestion", "proxy.log")
 	os.MkdirAll(filepath.Dir(logPath), 0755)
-	os.WriteFile(logPath, []byte("shell buffer content"), 0644)
+	os.WriteFile(logPath, []byte("scrollback content"), 0644)
 
-	got, err := getShellBuffer(100)
+	got, err := getScrollback(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "shell buffer content" {
-		t.Errorf("expected %q, got %q", "shell buffer content", got)
+	if got != "scrollback content" {
+		t.Errorf("expected %q, got %q", "scrollback content", got)
 	}
 }
 
-func TestDoGetShellBuffer_Tmux(t *testing.T) {
+func TestDoGetScrollback_Tmux(t *testing.T) {
 	t.Setenv("TMUX", "1")
 	t.Setenv("KITTY_LISTEN_ON", "")
 
@@ -244,21 +311,21 @@ func TestDoGetShellBuffer_Tmux(t *testing.T) {
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
 		if name == "tmux" {
-			return exec.Command("echo", "tmux buffer")
+			return exec.Command("echo", "tmux scrollback")
 		}
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer(100)
+	got, err := getScrollback(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "tmux buffer" {
-		t.Errorf("expected tmux buffer, got %q", got)
+	if got != "tmux scrollback" {
+		t.Errorf("expected tmux scrollback, got %q", got)
 	}
 }
 
-func TestDoGetShellBuffer_Kitty(t *testing.T) {
+func TestDoGetScrollback_Kitty(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("KITTY_LISTEN_ON", "1")
 
@@ -267,21 +334,21 @@ func TestDoGetShellBuffer_Kitty(t *testing.T) {
 
 	execCommand = func(name string, arg ...string) *exec.Cmd {
 		if name == "kitten" {
-			return exec.Command("echo", "kitty buffer")
+			return exec.Command("echo", "kitty scrollback")
 		}
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer(100)
+	got, err := getScrollback(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "kitty buffer" {
-		t.Errorf("expected kitty buffer, got %q", got)
+	if got != "kitty scrollback" {
+		t.Errorf("expected kitty scrollback, got %q", got)
 	}
 }
 
-func TestDoGetShellBuffer_Screen(t *testing.T) {
+func TestDoGetScrollback_Screen(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("KITTY_LISTEN_ON", "")
 	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")
@@ -297,22 +364,22 @@ func TestDoGetShellBuffer_Screen(t *testing.T) {
 			// Screen writes to file. The last arg is the file path.
 			argFile := arg[len(arg)-1]
 			os.MkdirAll(filepath.Dir(argFile), 0755)
-			os.WriteFile(argFile, []byte("screen buffer"), 0644)
+			os.WriteFile(argFile, []byte("screen scrollback"), 0644)
 			return exec.Command("true")
 		}
 		return exec.Command("echo", "")
 	}
 
-	got, err := getShellBuffer(100)
+	got, err := getScrollback(100, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "screen buffer" {
-		t.Errorf("expected screen buffer, got %q", got)
+	if got != "screen scrollback" {
+		t.Errorf("expected screen scrollback, got %q", got)
 	}
 }
 
-func TestDoGetShellBuffer_Fallback(t *testing.T) {
+func TestDoGetScrollback_Fallback(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("KITTY_LISTEN_ON", "")
 	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")
@@ -329,10 +396,54 @@ func TestDoGetShellBuffer_Fallback(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
-	_, err := getShellBuffer(100)
+	_, err := getScrollback(100, "")
 	if err == nil {
 		t.Error("expected error for fallback, got nil")
-	} else if !strings.Contains(err.Error(), "no terminal buffer available") {
-		t.Errorf("expected no terminal buffer error, got %v", err)
+	} else if !strings.Contains(err.Error(), "no scrollback available") {
+		t.Errorf("expected no scrollback available error, got %v", err)
+	}
+}
+
+func TestDoGetScrollback_ScrollbackFile(t *testing.T) {
+	t.Setenv("TMUX", "")
+	t.Setenv("KITTY_LISTEN_ON", "")
+
+	tempDir := t.TempDir()
+	scrollbackFile := filepath.Join(tempDir, "history.txt")
+	os.WriteFile(scrollbackFile, []byte("ghostty scrollback content"), 0644)
+
+	got, err := getScrollback(100, scrollbackFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "ghostty scrollback content" {
+		t.Errorf("expected ghostty scrollback content, got %q", got)
+	}
+}
+
+func TestDoGetScrollback_ScrollbackFilePriority(t *testing.T) {
+	// Scrollback file should take priority over tmux
+	t.Setenv("TMUX", "1")
+
+	oldExecCommand := execCommand
+	defer func() { execCommand = oldExecCommand }()
+
+	execCommand = func(name string, arg ...string) *exec.Cmd {
+		if name == "tmux" {
+			return exec.Command("echo", "tmux scrollback")
+		}
+		return exec.Command("echo", "")
+	}
+
+	tempDir := t.TempDir()
+	scrollbackFile := filepath.Join(tempDir, "history.txt")
+	os.WriteFile(scrollbackFile, []byte("ghostty scrollback"), 0644)
+
+	got, err := getScrollback(100, scrollbackFile)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "ghostty scrollback" {
+		t.Errorf("expected ghostty scrollback (priority over tmux), got %q", got)
 	}
 }
