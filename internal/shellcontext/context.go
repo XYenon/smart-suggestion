@@ -262,18 +262,18 @@ func getScreenScrollback() (string, error) {
 		return "", fmt.Errorf("not in a screen session")
 	}
 
-	screenBufferFile := filepath.Join(paths.GetCacheDir(), "screen_buffer.txt")
-	cmd := execCommand("screen", "-X", "hardcopy", screenBufferFile)
+	screenScrollbackFile := filepath.Join(paths.GetCacheDir(), "screen_scrollback.txt")
+	cmd := execCommand("screen", "-X", "hardcopy", screenScrollbackFile)
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to capture screen buffer: %w", err)
+		return "", fmt.Errorf("failed to capture screen scrollback: %w", err)
 	}
 
-	content, err := os.ReadFile(screenBufferFile)
+	content, err := os.ReadFile(screenScrollbackFile)
 	if err != nil {
-		return "", fmt.Errorf("failed to read screen buffer: %w", err)
+		return "", fmt.Errorf("failed to read screen scrollback: %w", err)
 	}
 
-	os.Remove(screenBufferFile)
+	os.Remove(screenScrollbackFile)
 
 	return strings.TrimSpace(string(content)), nil
 }

@@ -18,7 +18,7 @@ The project consists of three main components:
     - Handles user interaction (keybindings, display).
     - Manages configuration and environment variables.
     - Invokes the Go binary to fetch suggestions.
-    - Handles the result (replacing buffer or showing autosuggestion).
+    - Handles the result (replacing command line or showing autosuggestion).
 
 2.  **Go Binary (`cmd/smart-suggestion/main.go`)**:
     - **`suggest` (default)**: The core command.
@@ -34,7 +34,7 @@ The project consists of three main components:
 
 ## Context Acquisition
 
-To provide relevant suggestions, the tool gathers context from the user's shell environment. The **Shell Buffer** (what is currently visible on screen) is acquired using the following priority strategies:
+To provide relevant suggestions, the tool gathers context from the user's shell environment. The **Scrollback** (what is currently visible on screen) is acquired using the following priority strategies:
 
 1.  **Tmux**: Checks for `TMUX` env var. Uses `tmux capture-pane -pS -`.
 2.  **Kitty**: Checks for `KITTY_LISTEN_ON` env var. Uses `kitten @ get-text --extent all`.
@@ -50,7 +50,7 @@ It also captures:
 ## Data Flow
 
 1.  User triggers suggestion (default `Ctrl+O`).
-2.  Zsh plugin captures current buffer, cursor position.
+2.  Zsh plugin captures current command line, cursor position.
 3.  Zsh plugin collects history and aliases.
 4.  Zsh plugin invokes `smart-suggestion --provider ... --input ...`.
 5.  Go binary constructs a prompt including the system instructions and collected context.

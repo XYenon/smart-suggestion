@@ -266,7 +266,7 @@ smart-suggestion
 
 1. **Input Capture**: The plugin captures your current command line input
 2. **Proxy Mode (Default)**: Automatically starts a background shell recording session to capture terminal output for better context
-3. **Context Collection**: Gathers rich shell context including user info, directory, command history, aliases, and terminal buffer content via proxy mode
+3. **Context Collection**: Gathers rich shell context including user info, directory, command history, aliases, and terminal scrollback content via proxy mode
 4. **AI Processing**: Sends the input and context to your configured AI provider
 5. **Smart Response**: AI returns either a completion (`+`) or new command (`=`)
 6. **Shell Integration**: The suggestion is displayed using zsh-autosuggestions or replaces your input

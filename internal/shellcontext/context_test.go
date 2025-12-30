@@ -202,7 +202,7 @@ func TestBuildContextInfo(t *testing.T) {
 	}
 }
 
-func TestBuildContextInfo_NoBuffer(t *testing.T) {
+func TestBuildContextInfo_NoScrollback(t *testing.T) {
 	t.Setenv("TMUX", "")
 	t.Setenv("KITTY_LISTEN_ON", "")
 	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")

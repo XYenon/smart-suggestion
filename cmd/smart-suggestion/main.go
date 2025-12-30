@@ -25,7 +25,7 @@ Your tasks:
         2. Did the last few commands solve the intention? Why or why not?
         3. Based on the latest information, how can you solve the user's intention?
     - After reasoning, you will either complete the command or provide a new command that you think the user is trying to type.
-    - You need to predict what command the user wants to input next based on shell history and shell buffer.
+    - You need to predict what command the user wants to input next based on shell history and scrollback.
 
 RULES FOR FINAL OUTPUT (MANDATORY - MUST BE FOLLOWED EXACTLY):
     - YOU MUST start your response with EITHER an equal sign (=) for new commands OR a plus sign (+) for completions. NO EXCEPTIONS!
@@ -66,7 +66,7 @@ IMPORTANT EXAMPLES OF NEW COMMANDS (MUST USE =):
 3. The 'cat' command can be used to display the file content.
 </reasoning>
 =cat /tmp/smart-suggestion.log
-    * Shell buffer:
+    * Scrollback:
         # k -n my-namespace get pod
         NAME           READY   STATUS             RESTARTS         AGE
         pod-name-aaa   2/3     CrashLoopBackOff   358 (111s ago)   30h
@@ -78,7 +78,7 @@ IMPORTANT EXAMPLES OF NEW COMMANDS (MUST USE =):
 3. The command 'kubectl logs' will show the logs for 'pod-name-aaa'.
 </reasoning>
 =kubectl -n my-namespace logs pod-name-aaa
-    * Shell buffer:
+    * Scrollback:
         # k -n my-namespace get pod
         NAME           READY   STATUS             RESTARTS         AGE
         pod-name-aaa   3/3     Running            0                30h
@@ -90,7 +90,7 @@ IMPORTANT EXAMPLES OF NEW COMMANDS (MUST USE =):
 3. 'kubectl describe pod' will give more details about why the pod is pending.
 </reasoning>
 =kubectl -n my-namespace describe pod pod-name-bbb
-    * Shell buffer:
+    * Scrollback:
         # k get node
         NAME      STATUS   ROLES    AGE   VERSION
         node-aaa  Ready    <none>   3h    v1.25.3
@@ -112,7 +112,7 @@ IMPORTANT EXAMPLES OF COMPLETIONS (MUST USE +):
 3. Completing with 'p' will form '/tmp'.
 </reasoning>
 +p
-    * Shell buffer:
+    * Scrollback:
         # k -n my-namespace get pod
         NAME           READY   STATUS             RESTARTS         AGE
         pod-name-aaa   3/3     Running            0                30h
