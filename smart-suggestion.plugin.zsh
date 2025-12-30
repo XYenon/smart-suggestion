@@ -85,7 +85,7 @@ fi
 
 function _run_smart_suggestion_proxy() {
     if [[ $- == *i* ]]; then
-        "$SMART_SUGGESTION_BINARY" proxy --scrollback-lines "$SMART_SUGGESTION_SCROLLBACK_LINES"
+        exec "$SMART_SUGGESTION_BINARY" proxy --scrollback-lines "$SMART_SUGGESTION_SCROLLBACK_LINES"
     fi
 }
 
@@ -296,7 +296,7 @@ function smart-suggestion() {
 zle -N _do_smart_suggestion
 bindkey "$SMART_SUGGESTION_KEY" _do_smart_suggestion
 
-if [[ "$SMART_SUGGESTION_PROXY_MODE" == "true" && -z "$TMUX" && -z "$KITTY_LISTEN_ON" && -z "$GHOSTTY_RESOURCES_DIR" ]]; then
+if [[ -z "$SMART_SUGGESTION_PROXY_ACTIVE" && "$SMART_SUGGESTION_PROXY_MODE" == "true" && -z "$TMUX" && -z "$KITTY_LISTEN_ON" && -z "$GHOSTTY_RESOURCES_DIR" ]]; then
     _run_smart_suggestion_proxy
 fi
 

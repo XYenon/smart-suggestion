@@ -34,13 +34,6 @@ func RunProxy(shell string, opts ProxyOptions) error {
 }
 
 func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.Writer) error {
-	if os.Getenv("SMART_SUGGESTION_PROXY_ACTIVE") != "" {
-		debug.Log("Already inside a proxy session, preventing nesting", map[string]any{
-			"existing_proxy_pid": os.Getenv("SMART_SUGGESTION_PROXY_ACTIVE"),
-		})
-		return nil
-	}
-
 	sessionLogFile := session.GetSessionBasedLogFile(opts.LogFile, opts.SessionID)
 	baseLockFile := strings.TrimSuffix(opts.LogFile, filepath.Ext(opts.LogFile)) + ".lock"
 	sessionLockFile := getSessionBasedLockFile(baseLockFile, opts.SessionID)
@@ -135,19 +128,21 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Only wait for pty→stdout goroutine to determine session end
+	var outWG sync.WaitGroup
+	outWG.Add(1)
 
+	// stdin → pty: not used as exit condition, allowed to block in background
 	go func() {
-		defer wg.Done()
 		_, err := io.Copy(ptmx, stdin)
 		if err != nil {
 			debug.Log("Error copying stdin to pty", map[string]any{"error": err.Error()})
 		}
 	}()
 
+	// pty → stdout & log: ends when shell exits and pty EOF
 	go func() {
-		defer wg.Done()
+		defer outWG.Done()
 		_, err := io.Copy(teeWriter, ptmx)
 		if err != nil {
 			debug.Log("Error copying pty to output", map[string]any{"error": err.Error()})
@@ -156,7 +151,7 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 
 	done := make(chan struct{})
 	go func() {
-		wg.Wait()
+		outWG.Wait()
 		close(done)
 	}()
 
@@ -168,6 +163,8 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 			"signal":   sig.String(),
 			"log_file": opts.LogFile,
 		})
+		// Close pty to unblock goroutines when receiving signal
+		_ = ptmx.Close()
 	}
 
 	_ = c.Wait()

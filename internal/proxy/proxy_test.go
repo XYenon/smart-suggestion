@@ -83,17 +83,6 @@ func TestRunProxy_Error(t *testing.T) {
 	}
 }
 
-func TestRunProxy_AlreadyActive(t *testing.T) {
-	t.Setenv("SMART_SUGGESTION_PROXY_ACTIVE", "123")
-	err := RunProxy("bash", ProxyOptions{
-		LogFile:   filepath.Join(t.TempDir(), "proxy.log"),
-		SessionID: "test",
-	})
-	if err != nil {
-		t.Errorf("expected nil error for already active proxy, got %v", err)
-	}
-}
-
 func TestCreateProcessLock_InvalidDir(t *testing.T) {
 	// Lock path in a location we can't create
 	lockPath := "/non/existent/dir/test.lock"
