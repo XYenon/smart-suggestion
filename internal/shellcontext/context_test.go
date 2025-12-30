@@ -447,3 +447,93 @@ func TestDoGetScrollback_ScrollbackFilePriority(t *testing.T) {
 		t.Errorf("expected ghostty scrollback (priority over tmux), got %q", got)
 	}
 }
+
+func TestIsTermux_WithTermuxVersion(t *testing.T) {
+	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	defer func() {
+		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
+		os.Setenv("PREFIX", oldPrefix)
+	}()
+
+	os.Setenv("TERMUX_VERSION", "0.118.0")
+	os.Setenv("PREFIX", "")
+
+	if !isTermux() {
+		t.Error("expected isTermux() to return true when TERMUX_VERSION is set")
+	}
+}
+
+func TestIsTermux_WithPrefix(t *testing.T) {
+	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	defer func() {
+		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
+		os.Setenv("PREFIX", oldPrefix)
+	}()
+
+	os.Setenv("TERMUX_VERSION", "")
+	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
+
+	if !isTermux() {
+		t.Error("expected isTermux() to return true when PREFIX contains com.termux")
+	}
+}
+
+func TestIsTermux_NotTermux(t *testing.T) {
+	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	defer func() {
+		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
+		os.Setenv("PREFIX", oldPrefix)
+	}()
+
+	os.Setenv("TERMUX_VERSION", "")
+	os.Setenv("PREFIX", "/usr/local")
+
+	if isTermux() {
+		t.Error("expected isTermux() to return false when not in Termux")
+	}
+}
+
+func TestGetSystemInfo_Termux(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("Skipping Termux test on macOS")
+	}
+
+	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	defer func() {
+		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
+		os.Setenv("PREFIX", oldPrefix)
+	}()
+
+	os.Setenv("TERMUX_VERSION", "0.118.0")
+	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
+
+	got := getSystemInfo()
+	if !strings.Contains(got, "Android with Termux 0.118.0") {
+		t.Errorf("expected system info to contain 'Android with Termux 0.118.0', got %q", got)
+	}
+}
+
+func TestGetSystemInfo_TermuxWithoutVersion(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("Skipping Termux test on macOS")
+	}
+
+	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	defer func() {
+		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
+		os.Setenv("PREFIX", oldPrefix)
+	}()
+
+	os.Setenv("TERMUX_VERSION", "")
+	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
+
+	got := getSystemInfo()
+	if !strings.Contains(got, "Android with Termux") {
+		t.Errorf("expected system info to contain 'Android with Termux', got %q", got)
+	}
+}

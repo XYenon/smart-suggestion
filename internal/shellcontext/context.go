@@ -82,6 +82,14 @@ func getSystemInfo() string {
 		return fmt.Sprintf("Your system is %s.", strings.Join(processed, "."))
 	}
 
+	if isTermux() {
+		termuxVersion := os.Getenv("TERMUX_VERSION")
+		if termuxVersion != "" {
+			return fmt.Sprintf("Your system is Android with Termux %s.", termuxVersion)
+		}
+		return "Your system is Android with Termux."
+	}
+
 	releaseFiles := []string{"/etc/os-release", "/etc/lsb-release", "/etc/redhat-release"}
 	var content []string
 
@@ -283,4 +291,12 @@ func getTerminalScrollbackWithTput() (string, error) {
 	}
 
 	return "", fmt.Errorf("tput method not fully implemented (terminal has %d rows)", rows)
+}
+
+func isTermux() bool {
+	if os.Getenv("TERMUX_VERSION") != "" {
+		return true
+	}
+	prefix := os.Getenv("PREFIX")
+	return strings.Contains(prefix, "com.termux")
 }

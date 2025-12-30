@@ -37,6 +37,10 @@ jobs:
             arch: arm64
             goos: darwin
             goarch: arm64
+          - os: android
+            arch: arm64
+            goos: android
+            goarch: arm64
 
     steps:
     - name: Checkout code
@@ -176,7 +180,7 @@ jobs:
           ### Supported Platforms
           - Linux (x86_64, ARM64)
           - macOS (Intel, Apple Silicon)
-          - Windows (x86_64)
+          - Android (ARM64, Termux)
 
           ### Changes
           See the commit history for detailed changes in this release.

@@ -57,7 +57,14 @@ detect_platform() {
 
     # Detect OS
     case "$(uname -s)" in
-        Linux*)     os="linux";;
+        Linux*)
+            # Check if running in Termux (Android)
+            if [[ -n "$TERMUX_VERSION" ]] || [[ "$PREFIX" == *"com.termux"* ]]; then
+                os="android"
+            else
+                os="linux"
+            fi
+            ;;
         Darwin*)    os="darwin";;
         MINGW*|MSYS*|CYGWIN*) os="windows";;
         *)          log_error "Unsupported OS: $(uname -s)"; exit 1;;
