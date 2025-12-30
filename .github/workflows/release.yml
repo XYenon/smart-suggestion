@@ -25,22 +25,28 @@ jobs:
             arch: amd64
             goos: linux
             goarch: amd64
+            cgo: 0
           - os: linux
             arch: arm64
             goos: linux
             goarch: arm64
+            cgo: 0
           - os: darwin
             arch: amd64
             goos: darwin
             goarch: amd64
+            cgo: 0
           - os: darwin
             arch: arm64
             goos: darwin
             goarch: arm64
+            cgo: 0
           - os: android
             arch: arm64
             goos: android
             goarch: arm64
+            cgo: 1
+            android_api: 24
 
     steps:
     - name: Checkout code
@@ -54,15 +60,43 @@ jobs:
     - name: Get dependencies
       run: go mod download
 
+    - name: Setup Android NDK
+      if: matrix.goos == 'android'
+      id: setup-ndk
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r26d
+        add-to-path: false
+
     - name: Build binary
       env:
         GOOS: ${{ matrix.goos }}
         GOARCH: ${{ matrix.goarch }}
-        CGO_ENABLED: 0
+        CGO_ENABLED: ${{ matrix.cgo }}
+        ANDROID_API: ${{ matrix.android_api }}
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         VERSION=${GITHUB_REF_NAME#v}
         BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
         GIT_COMMIT=$(git rev-parse --short HEAD)
+
+        # For Android builds, set up the NDK toolchain
+        if [ "$GOOS" = "android" ]; then
+          if [ -z "$ANDROID_NDK_HOME" ]; then
+            echo "ANDROID_NDK_HOME is not set"
+            exit 1
+          fi
+          TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          if [ "$GOARCH" = "arm64" ]; then
+            export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
+          elif [ "$GOARCH" = "arm" ]; then
+            export CC="$TOOLCHAIN_BIN/armv7a-linux-androideabi${ANDROID_API}-clang"
+          else
+            echo "Unsupported Android GOARCH=$GOARCH"
+            exit 1
+          fi
+          echo "Using Android NDK CC=$CC"
+        fi
 
         mkdir -p dist
         go build -ldflags="-w -s -X main.Version=$VERSION -X main.BuildTime=$BUILD_TIME -X main.GitCommit=$GIT_COMMIT -X main.OS=$GOOS -X main.Arch=$GOARCH" \
