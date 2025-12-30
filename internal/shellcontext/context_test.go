@@ -409,7 +409,7 @@ func TestDoGetScrollback_ScrollbackFile(t *testing.T) {
 	t.Setenv("KITTY_LISTEN_ON", "")
 
 	tempDir := t.TempDir()
-	scrollbackFile := filepath.Join(tempDir, "history.txt")
+	scrollbackFile := filepath.Join(tempDir, "screen.txt")
 	os.WriteFile(scrollbackFile, []byte("ghostty scrollback content"), 0644)
 
 	got, err := getScrollback(100, scrollbackFile)
@@ -436,7 +436,7 @@ func TestDoGetScrollback_ScrollbackFilePriority(t *testing.T) {
 	}
 
 	tempDir := t.TempDir()
-	scrollbackFile := filepath.Join(tempDir, "history.txt")
+	scrollbackFile := filepath.Join(tempDir, "screen.txt")
 	os.WriteFile(scrollbackFile, []byte("ghostty scrollback"), 0644)
 
 	got, err := getScrollback(100, scrollbackFile)

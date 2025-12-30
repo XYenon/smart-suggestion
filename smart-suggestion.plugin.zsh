@@ -93,9 +93,9 @@ function _run_smart_suggestion_proxy() {
 function _extract_ghostty_scrollback_file() {
     local input="$1"
 
-    # Match Ghostty temp file: /<tmpdir>/<22-char-base64>/history.txt
+    # Match Ghostty temp file: /<tmpdir>/<22-char-base64>/screen.txt
     # Limit prefix to common temp directories: /tmp, /var, /private
-    if [[ "$input" =~ (/(tmp|var|private)/[^[:space:]]+/[A-Za-z0-9_-]{22}/history\.txt) ]]; then
+    if [[ "$input" =~ (/(tmp|var|private)/[^[:space:]]+/[A-Za-z0-9_-]{22}/screen\.txt) ]]; then
         local file="${match[1]}"
         [[ -f "$file" ]] && echo "$file"
     fi
