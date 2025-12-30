@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,6 +21,63 @@ import (
 	"github.com/xyenon/smart-suggestion/internal/session"
 	"golang.org/x/term"
 )
+
+// ansiEscapeRegex matches ANSI escape sequences including:
+// - CSI sequences: ESC [ ... (most common, used for colors, cursor movement, etc.)
+// - OSC sequences: ESC ] ... BEL or ESC ] ... ST (operating system commands)
+// - Other escape sequences: ESC followed by various characters
+var ansiEscapeRegex = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|\[[^\x1b]*|[PX^_][^\x1b]*\x1b\\|.)`)
+
+// oscContentRegex matches leftover OSC content (e.g., "7;file://..." after ESC ] is stripped)
+var oscContentRegex = regexp.MustCompile(`^\d+;[^\n]*`)
+
+// stripANSI removes ANSI escape sequences and simulates terminal behavior for control characters
+func stripANSI(s string) string {
+	// First pass: remove ANSI escape sequences
+	s = ansiEscapeRegex.ReplaceAllString(s, "")
+	// Second pass: remove leftover OSC content at line start
+	s = oscContentRegex.ReplaceAllString(s, "")
+	// Third pass: simulate terminal behavior
+	s = simulateTerminal(s)
+	return s
+}
+
+// simulateTerminal processes control characters to simulate terminal display
+func simulateTerminal(s string) string {
+	runes := []rune(s)
+	var result []rune
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		switch r {
+		case '\x08': // Backspace: delete previous character
+			if len(result) > 0 && result[len(result)-1] != '\n' {
+				result = result[:len(result)-1]
+			}
+		case '\r': // Carriage return
+			// Check if this is \r\n (Windows line ending) - treat as just \n
+			if i+1 < len(runes) && runes[i+1] == '\n' {
+				continue // Skip \r, the \n will be added in next iteration
+			}
+			// Otherwise, move cursor to beginning of line (erase current line content)
+			lastNewline := -1
+			for j := len(result) - 1; j >= 0; j-- {
+				if result[j] == '\n' {
+					lastNewline = j
+					break
+				}
+			}
+			result = result[:lastNewline+1]
+		case '\x07': // Bell: ignore
+		case '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06': // Control chars: ignore
+		case '\x0b', '\x0c': // Vertical tab, form feed: treat as newline
+			result = append(result, '\n')
+		case '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1c', '\x1d', '\x1e', '\x1f', '\x7f': // Other control chars: ignore
+		default:
+			result = append(result, r)
+		}
+	}
+	return string(result)
+}
 
 type ProxyOptions struct {
 	LogFile         string
@@ -343,6 +401,8 @@ func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
 		line := string(w.buf[:idx+1])
 		w.buf = w.buf[idx+1:]
 
+		// Strip ANSI escape sequences before storing
+		line = stripANSI(line)
 		w.lines = append(w.lines, line)
 		if len(w.lines) > w.maxLines {
 			w.lines = w.lines[1:]

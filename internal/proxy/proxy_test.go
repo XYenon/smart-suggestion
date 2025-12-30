@@ -524,3 +524,218 @@ func TestLineLimitedWriter_SingleLine(t *testing.T) {
 		t.Errorf("expected %q, got %q", expected, string(content))
 	}
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "no escape sequences",
+			input:    "hello world",
+			expected: "hello world",
+		},
+		{
+			name:     "simple color",
+			input:    "\x1b[31mred text\x1b[0m",
+			expected: "red text",
+		},
+		{
+			name:     "bold and color",
+			input:    "\x1b[1;32mbold green\x1b[0m",
+			expected: "bold green",
+		},
+		{
+			name:     "cursor movement",
+			input:    "\x1b[2Jclear screen\x1b[H",
+			expected: "clear screen",
+		},
+		{
+			name:     "OSC sequence (window title)",
+			input:    "\x1b]0;Window Title\x07content",
+			expected: "content",
+		},
+		{
+			name:     "OSC 7 file URL",
+			input:    "\x1b]7;file://hostname/path\x07content",
+			expected: "content",
+		},
+		{
+			name:     "leftover OSC content at line start",
+			input:    "7;file://M20RQRV6G4/Users/bytedance\nactual content",
+			expected: "\nactual content",
+		},
+		{
+			name:     "mixed content",
+			input:    "start \x1b[31mred\x1b[0m middle \x1b[1mbold\x1b[0m end",
+			expected: "start red middle bold end",
+		},
+		{
+			name:     "256 color",
+			input:    "\x1b[38;5;196mred\x1b[0m",
+			expected: "red",
+		},
+		{
+			name:     "RGB color",
+			input:    "\x1b[38;2;255;0;0mred\x1b[0m",
+			expected: "red",
+		},
+		{
+			name:     "cursor save/restore",
+			input:    "\x1b7saved\x1b8restored",
+			expected: "savedrestored",
+		},
+		{
+			name:     "erase line",
+			input:    "text\x1b[Kerased",
+			expected: "texterased",
+		},
+		{
+			name:     "backspace simulates deletion",
+			input:    "abc\x08\x08xy",
+			expected: "axy",
+		},
+		{
+			name:     "backspace at line start",
+			input:    "line1\n\x08\x08line2",
+			expected: "line1\nline2",
+		},
+		{
+			name:     "carriage return overwrites line",
+			input:    "old text\rnew",
+			expected: "new",
+		},
+		{
+			name:     "carriage return with newline",
+			input:    "line1\r\nline2",
+			expected: "line1\nline2",
+		},
+		{
+			name:     "bell character removed",
+			input:    "alert\x07text",
+			expected: "alerttext",
+		},
+		{
+			name:     "progress bar simulation",
+			input:    "Loading... 10%\rLoading... 50%\rLoading... 100%",
+			expected: "Loading... 100%",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripANSI(tt.input)
+			if got != tt.expected {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSimulateTerminal(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple text",
+			input:    "hello",
+			expected: "hello",
+		},
+		{
+			name:     "backspace deletes char",
+			input:    "ab\x08c",
+			expected: "ac",
+		},
+		{
+			name:     "multiple backspaces",
+			input:    "abcd\x08\x08\x08xyz",
+			expected: "axyz",
+		},
+		{
+			name:     "backspace at start does nothing",
+			input:    "\x08\x08abc",
+			expected: "abc",
+		},
+		{
+			name:     "backspace stops at newline",
+			input:    "line1\n\x08\x08abc",
+			expected: "line1\nabc",
+		},
+		{
+			name:     "carriage return resets line",
+			input:    "hello\rworld",
+			expected: "world",
+		},
+		{
+			name:     "CR preserves previous lines",
+			input:    "line1\nold\rnew",
+			expected: "line1\nnew",
+		},
+		{
+			name:     "CRLF becomes LF",
+			input:    "a\r\nb",
+			expected: "a\nb",
+		},
+		{
+			name:     "vertical tab becomes newline",
+			input:    "a\x0bb",
+			expected: "a\nb",
+		},
+		{
+			name:     "form feed becomes newline",
+			input:    "a\x0cb",
+			expected: "a\nb",
+		},
+		{
+			name:     "spinner simulation",
+			input:    "|\r/\r-\r\\\r|",
+			expected: "|",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := simulateTerminal(tt.input)
+			if got != tt.expected {
+				t.Errorf("simulateTerminal(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLineLimitedWriter_StripANSI(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "ansi.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 5)
+
+	// Write lines with ANSI escape sequences
+	w.Write([]byte("\x1b[31merror: something failed\x1b[0m\n"))
+	w.Write([]byte("\x1b[1;32mSuccess!\x1b[0m\n"))
+	w.Write([]byte("normal line\n"))
+
+	content, _ := os.ReadFile(logPath)
+	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %v", len(lines), lines)
+	}
+	if lines[0] != "error: something failed" {
+		t.Errorf("expected 'error: something failed', got %q", lines[0])
+	}
+	if lines[1] != "Success!" {
+		t.Errorf("expected 'Success!', got %q", lines[1])
+	}
+	if lines[2] != "normal line" {
+		t.Errorf("expected 'normal line', got %q", lines[2])
+	}
+}
