@@ -15,7 +15,10 @@ import (
 	"github.com/xyenon/smart-suggestion/internal/session"
 )
 
-var execCommand = exec.Command
+var (
+	execCommand = exec.Command
+	runtimeGOOS = runtime.GOOS
+)
 
 func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error) {
 	var parts []string
@@ -69,7 +72,7 @@ func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error
 }
 
 func getSystemInfo() string {
-	if runtime.GOOS == "darwin" {
+	if runtimeGOOS == "darwin" {
 		out, err := execCommand("sw_vers").Output()
 		if err != nil {
 			return "Your system is macOS."

@@ -10,11 +10,7 @@ import (
 	"testing"
 )
 
-func TestGetSystemInfo_Error(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Skipping macOS specific test")
-	}
-
+func TestGetSystemInfo_DarwinError(t *testing.T) {
 	oldExecCommand := execCommand
 	defer func() { execCommand = oldExecCommand }()
 
@@ -25,6 +21,10 @@ func TestGetSystemInfo_Error(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
+	oldGOOS := runtimeGOOS
+	runtimeGOOS = "darwin"
+	defer func() { runtimeGOOS = oldGOOS }()
+
 	got := getSystemInfo()
 	if got != "Your system is macOS." {
 		t.Errorf("expected default macOS msg, got %q", got)
@@ -32,10 +32,6 @@ func TestGetSystemInfo_Error(t *testing.T) {
 }
 
 func TestGetSystemInfo_DarwinSuccess(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Skipping macOS specific test")
-	}
-
 	oldExecCommand := execCommand
 	defer func() { execCommand = oldExecCommand }()
 
@@ -46,9 +42,24 @@ func TestGetSystemInfo_DarwinSuccess(t *testing.T) {
 		return exec.Command("echo", "")
 	}
 
+	oldGOOS := runtimeGOOS
+	runtimeGOOS = "darwin"
+	defer func() { runtimeGOOS = oldGOOS }()
+
 	got := getSystemInfo()
 	if !strings.Contains(got, "macOS") {
 		t.Errorf("expected system info to contain macOS, got %q", got)
+	}
+}
+
+func TestGetSystemInfo_LinuxNoReleaseFiles(t *testing.T) {
+	oldGOOS := runtimeGOOS
+	runtimeGOOS = "linux"
+	defer func() { runtimeGOOS = oldGOOS }()
+
+	got := getSystemInfo()
+	if got != "Your system is Linux." {
+		t.Fatalf("expected Linux default, got %q", got)
 	}
 }
 
