@@ -84,36 +84,70 @@ func InstallUpdate(downloadURL string) error {
 		return err
 	}
 
-	newBinary := filepath.Join(extractDir, "smart-suggestion")
-	if _, err := os.Stat(newBinary); os.IsNotExist(err) {
-		entries, _ := os.ReadDir(extractDir)
-		for _, entry := range entries {
-			if entry.IsDir() {
-				candidate := filepath.Join(extractDir, entry.Name(), "smart-suggestion")
-				if _, err := os.Stat(candidate); err == nil {
-					newBinary = candidate
-					break
-				}
-			}
-		}
+	newBinary, ok := findExtractedAsset(extractDir, "smart-suggestion")
+	if !ok {
+		return fmt.Errorf("failed to locate extracted binary")
 	}
 
-	backupPath := currentBinary + ".backup"
-	if err := os.Rename(currentBinary, backupPath); err != nil {
-		return fmt.Errorf("failed to backup current binary: %w", err)
+	pluginInstallPath := filepath.Join(filepath.Dir(currentBinary), "smart-suggestion.plugin.zsh")
+
+	newPluginPath, ok := findExtractedAsset(extractDir, "smart-suggestion.plugin.zsh")
+	if !ok {
+		return fmt.Errorf("failed to locate extracted plugin")
 	}
 
-	if err := copyFile(newBinary, currentBinary); err != nil {
-		os.Rename(backupPath, currentBinary)
+	if err := replaceWithBackup(currentBinary, newBinary, 0755); err != nil {
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
 
-	if err := os.Chmod(currentBinary, 0755); err != nil {
-		return fmt.Errorf("failed to set executable permission: %w", err)
+	if err := replaceWithBackup(pluginInstallPath, newPluginPath, 0644); err != nil {
+		return fmt.Errorf("binary updated but failed to install plugin to %s: %w", pluginInstallPath, err)
 	}
 
-	os.Remove(backupPath)
 	return nil
+}
+
+func replaceWithBackup(targetPath, sourcePath string, mode os.FileMode) error {
+	backupPath := targetPath + ".backup"
+	if err := os.Rename(targetPath, backupPath); err != nil {
+		return err
+	}
+
+	if err := copyFile(sourcePath, targetPath); err != nil {
+		_ = os.Rename(backupPath, targetPath)
+		return err
+	}
+
+	if err := os.Chmod(targetPath, mode); err != nil {
+		_ = os.Rename(backupPath, targetPath)
+		return err
+	}
+
+	_ = os.Remove(backupPath)
+	return nil
+}
+
+func findExtractedAsset(extractDir, filename string) (string, bool) {
+	direct := filepath.Join(extractDir, filename)
+	if _, err := os.Stat(direct); err == nil {
+		return direct, true
+	}
+
+	entries, err := os.ReadDir(extractDir)
+	if err != nil {
+		return "", false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		candidate := filepath.Join(extractDir, entry.Name(), filename)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate, true
+		}
+	}
+
+	return "", false
 }
 
 func downloadFile(url, filepath string) error {

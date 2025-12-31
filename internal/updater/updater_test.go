@@ -87,6 +87,7 @@ func TestInstallUpdate_Success(t *testing.T) {
 	// Mock executable path
 	dummyExe := filepath.Join(tempDir, "smart-suggestion")
 	os.WriteFile(dummyExe, []byte("old binary"), 0755)
+	os.WriteFile(filepath.Join(tempDir, "smart-suggestion.plugin.zsh"), []byte("old plugin"), 0644)
 
 	oldOsExecutable := osExecutable
 	defer func() { osExecutable = oldOsExecutable }()
@@ -94,7 +95,7 @@ func TestInstallUpdate_Success(t *testing.T) {
 		return dummyExe, nil
 	}
 
-	// Create a mock tar.gz with the "new" binary
+	// Create a mock tar.gz with the "new" binary and plugin
 	archivePath := filepath.Join(tempDir, "update.tar.gz")
 	f, _ := os.Create(archivePath)
 	gw := gzip.NewWriter(f)
@@ -107,6 +108,15 @@ func TestInstallUpdate_Success(t *testing.T) {
 	}
 	tw.WriteHeader(hdr)
 	tw.Write([]byte(content))
+
+	pluginContent := "new plugin content"
+	plHdr := &tar.Header{
+		Name: "smart-suggestion.plugin.zsh",
+		Mode: 0644,
+		Size: int64(len(pluginContent)),
+	}
+	tw.WriteHeader(plHdr)
+	tw.Write([]byte(pluginContent))
 	tw.Close()
 	gw.Close()
 	f.Close()
@@ -135,6 +145,7 @@ func TestInstallUpdate_Subdir(t *testing.T) {
 
 	dummyExe := filepath.Join(tempDir, "smart-suggestion")
 	os.WriteFile(dummyExe, []byte("old binary"), 0755)
+	os.WriteFile(filepath.Join(tempDir, "smart-suggestion.plugin.zsh"), []byte("old plugin"), 0644)
 
 	oldOsExecutable := osExecutable
 	defer func() { osExecutable = oldOsExecutable }()
@@ -142,7 +153,7 @@ func TestInstallUpdate_Subdir(t *testing.T) {
 		return dummyExe, nil
 	}
 
-	// Create a mock tar.gz with binary in a SUBDIRECTORY
+	// Create a mock tar.gz with binary + plugin in a SUBDIRECTORY
 	archivePath := filepath.Join(tempDir, "update.tar.gz")
 	f, _ := os.Create(archivePath)
 	gw := gzip.NewWriter(f)
@@ -155,6 +166,15 @@ func TestInstallUpdate_Subdir(t *testing.T) {
 	}
 	tw.WriteHeader(hdr)
 	tw.Write([]byte(content))
+
+	pluginContent := "new plugin content in subdir"
+	plHdr := &tar.Header{
+		Name: "release-v1.2.3/smart-suggestion.plugin.zsh",
+		Mode: 0644,
+		Size: int64(len(pluginContent)),
+	}
+	tw.WriteHeader(plHdr)
+	tw.Write([]byte(pluginContent))
 	tw.Close()
 	gw.Close()
 	f.Close()
@@ -173,6 +193,177 @@ func TestInstallUpdate_Subdir(t *testing.T) {
 	got, _ := os.ReadFile(dummyExe)
 	if string(got) != content {
 		t.Errorf("expected updated binary content, got %q", string(got))
+	}
+}
+
+func TestInstallUpdate_AlsoInstallsPlugin(t *testing.T) {
+	tempDir := t.TempDir()
+
+	dummyExe := filepath.Join(tempDir, "smart-suggestion")
+	if err := os.WriteFile(dummyExe, []byte("old binary"), 0755); err != nil {
+		t.Fatalf("write dummy exe: %v", err)
+	}
+
+	pluginDst := filepath.Join(tempDir, "smart-suggestion.plugin.zsh")
+	if err := os.WriteFile(pluginDst, []byte("old plugin"), 0644); err != nil {
+		t.Fatalf("write old plugin: %v", err)
+	}
+
+	oldOsExecutable := osExecutable
+	defer func() { osExecutable = oldOsExecutable }()
+	osExecutable = func() (string, error) {
+		return dummyExe, nil
+	}
+
+	archivePath := filepath.Join(tempDir, "update.tar.gz")
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	binContent := "new binary"
+	binHdr := &tar.Header{Name: "smart-suggestion", Mode: 0755, Size: int64(len(binContent))}
+	tw.WriteHeader(binHdr)
+	tw.Write([]byte(binContent))
+
+	pluginContent := "new plugin"
+	plHdr := &tar.Header{Name: "smart-suggestion.plugin.zsh", Mode: 0644, Size: int64(len(pluginContent))}
+	tw.WriteHeader(plHdr)
+	tw.Write([]byte(pluginContent))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := os.ReadFile(archivePath)
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	if err := InstallUpdate(ts.URL); err != nil {
+		t.Fatalf("InstallUpdate error: %v", err)
+	}
+
+	gotBin, _ := os.ReadFile(dummyExe)
+	if string(gotBin) != binContent {
+		t.Fatalf("expected updated binary, got %q", string(gotBin))
+	}
+	gotPlugin, _ := os.ReadFile(pluginDst)
+	if string(gotPlugin) != pluginContent {
+		t.Fatalf("expected updated plugin, got %q", string(gotPlugin))
+	}
+
+	if _, err := os.Stat(pluginDst + ".backup"); !os.IsNotExist(err) {
+		t.Fatalf("expected plugin backup to be removed, stat error: %v", err)
+	}
+}
+
+func TestInstallUpdate_MissingPluginFails(t *testing.T) {
+	tempDir := t.TempDir()
+
+	dummyExe := filepath.Join(tempDir, "smart-suggestion")
+	if err := os.WriteFile(dummyExe, []byte("old binary"), 0755); err != nil {
+		t.Fatalf("write dummy exe: %v", err)
+	}
+
+	oldOsExecutable := osExecutable
+	defer func() { osExecutable = oldOsExecutable }()
+	osExecutable = func() (string, error) {
+		return dummyExe, nil
+	}
+
+	archivePath := filepath.Join(tempDir, "update.tar.gz")
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	binContent := "new binary"
+	binHdr := &tar.Header{Name: "smart-suggestion", Mode: 0755, Size: int64(len(binContent))}
+	tw.WriteHeader(binHdr)
+	tw.Write([]byte(binContent))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := os.ReadFile(archivePath)
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	err := InstallUpdate(ts.URL)
+	if err == nil {
+		t.Fatalf("expected error for missing plugin, got nil")
+	}
+}
+
+func TestInstallUpdate_PluginInstallFailureRollsBackPlugin(t *testing.T) {
+	tempDir := t.TempDir()
+
+	dummyExe := filepath.Join(tempDir, "smart-suggestion")
+	if err := os.WriteFile(dummyExe, []byte("old binary"), 0755); err != nil {
+		t.Fatalf("write dummy exe: %v", err)
+	}
+
+	pluginDst := filepath.Join(tempDir, "smart-suggestion.plugin.zsh")
+	oldPlugin := "old plugin"
+	if err := os.WriteFile(pluginDst, []byte(oldPlugin), 0644); err != nil {
+		t.Fatalf("write old plugin: %v", err)
+	}
+
+	oldOsExecutable := osExecutable
+	defer func() { osExecutable = oldOsExecutable }()
+	osExecutable = func() (string, error) {
+		return dummyExe, nil
+	}
+
+	archivePath := filepath.Join(tempDir, "update.tar.gz")
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	binContent := "new binary"
+	binHdr := &tar.Header{Name: "smart-suggestion", Mode: 0755, Size: int64(len(binContent))}
+	tw.WriteHeader(binHdr)
+	tw.Write([]byte(binContent))
+
+	pluginContent := "new plugin"
+	plHdr := &tar.Header{Name: "smart-suggestion.plugin.zsh", Mode: 0644, Size: int64(len(pluginContent))}
+	tw.WriteHeader(plHdr)
+	tw.Write([]byte(pluginContent))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := os.ReadFile(archivePath)
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	// Make plugin destination directory read-only so creating the new plugin file fails.
+	if err := os.Chmod(tempDir, 0555); err != nil {
+		t.Fatalf("chmod read-only: %v", err)
+	}
+	defer os.Chmod(tempDir, 0755)
+
+	err := InstallUpdate(ts.URL)
+	if err == nil {
+		t.Fatalf("expected error for plugin install failure, got nil")
+	}
+
+	// Plugin should be rolled back to original content.
+	if err := os.Chmod(tempDir, 0755); err != nil {
+		t.Fatalf("chmod restore: %v", err)
+	}
+	gotPlugin, readErr := os.ReadFile(pluginDst)
+	if readErr != nil {
+		t.Fatalf("read plugin after failure: %v", readErr)
+	}
+	if string(gotPlugin) != oldPlugin {
+		t.Fatalf("expected plugin rollback content %q, got %q", oldPlugin, string(gotPlugin))
 	}
 }
 
