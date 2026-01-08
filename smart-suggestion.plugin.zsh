@@ -1,10 +1,8 @@
-#!/usr/bin/env zsh
+# shellcheck shell=zsh
 
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-CONFIG_DIR="${XDG_CONFIG_HOME}/smart-suggestion"
-CONFIG_FILE="${SMART_SUGGESTION_CONFIG:-${CONFIG_DIR}/config.zsh}"
-if [[ -f "${CONFIG_FILE}" ]]; then
-    source "${CONFIG_FILE}"
+: ${SMART_SUGGESTION_CONFIG:="${XDG_CONFIG_HOME:-$HOME/.config}/smart-suggestion/config.zsh"}
+if [[ -f "${SMART_SUGGESTION_CONFIG}" ]]; then
+    source "${SMART_SUGGESTION_CONFIG}"
 fi
 
 # Default key binding
@@ -52,8 +50,7 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
     fi
 fi
 
-XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-SMART_SUGGESTION_CACHE_DIR="${XDG_CACHE_HOME}/smart-suggestion"
+: ${SMART_SUGGESTION_CACHE_DIR:="${XDG_CACHE_HOME:-$HOME/.cache}/smart-suggestion"}
 mkdir -p "$SMART_SUGGESTION_CACHE_DIR"
 
 if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
@@ -62,16 +59,17 @@ fi
 
 # Detect binary path
 if [[ -z "$SMART_SUGGESTION_BINARY" ]]; then
-    candidates=(
+    _smart_suggestion_candidates=(
         "${0:a:h}/smart-suggestion"
-        "${CONFIG_DIR}/smart-suggestion"
+        "${SMART_SUGGESTION_CONFIG:h}/smart-suggestion"
     )
-    for bin in "${candidates[@]}"; do
-        if [[ -f "$bin" ]]; then
-            typeset -g SMART_SUGGESTION_BINARY="$bin"
+    for _smart_suggestion_bin in "${_smart_suggestion_candidates[@]}"; do
+        if [[ -f "$_smart_suggestion_bin" ]]; then
+            typeset -g SMART_SUGGESTION_BINARY="$_smart_suggestion_bin"
             break
         fi
     done
+    unset _smart_suggestion_candidates _smart_suggestion_bin
     if [[ -z "$SMART_SUGGESTION_BINARY" ]]; then
         echo "No available smart-suggestion binary found. Please ensure that it is installed correctly or set SMART_SUGGESTION_BINARY to a valid binary path."
         return 1
@@ -105,9 +103,9 @@ function _fetch_suggestions() {
     local scrollback_file="$1"
 
     # Source config file and export all variables
-    if [[ -f "${CONFIG_FILE}" ]]; then
+    if [[ -f "${SMART_SUGGESTION_CONFIG}" ]]; then
         set -a
-        source "${CONFIG_FILE}"
+        source "${SMART_SUGGESTION_CONFIG}"
         set +a
     fi
 
