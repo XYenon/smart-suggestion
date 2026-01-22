@@ -49,30 +49,45 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 }
 
 func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
+	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
+}
+
+func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	debug.Log("Sending OpenAI request", map[string]any{
 		"model":         p.Model,
 		"system_prompt": systemPrompt,
+		"history":       history,
 		"input":         input,
 	})
+
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.SystemMessage(systemPrompt),
+	}
+
+	for _, msg := range history {
+		switch msg.Role {
+		case "user":
+			messages = append(messages, openai.UserMessage(msg.Content))
+		case "assistant":
+			messages = append(messages, openai.AssistantMessage(msg.Content))
+		}
+	}
+
+	messages = append(messages, openai.UserMessage(input))
 
 	resp, err := p.Client.Chat.Completions.New(
 		ctx,
 		openai.ChatCompletionNewParams{
-			Model: openai.ChatModel(p.Model),
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.SystemMessage(systemPrompt),
-				openai.UserMessage(input),
-			},
+			Model:    openai.ChatModel(p.Model),
+			Messages: messages,
 		},
 	)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
 	debug.Log("Received OpenAI response", map[string]any{
 		"response": resp,
 	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create chat completion: %w", err)
+	}
 
 	if len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no choices returned from OpenAI API")

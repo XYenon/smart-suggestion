@@ -119,6 +119,7 @@ Key variables:
 
 - **Commit Messages**: Always write commit messages in English.
 - **Code Formatting**: All Go code must be formatted with `go fmt ./...` before committing.
+- **Context Handling**: All code must accept context as a parameter and use `t.Context()` in tests.
 - **Markdown Tables**: All tables in README.md must be column-aligned.
 - **System Prompt**: The system prompt in `main.go` is critical. It defines the contract between the AI and the shell. Any changes to the AI logic must ensure this contract (`=`/`+` prefixes) is maintained.
 - **Error Handling**: Errors in the binary are printed to stderr. The Zsh plugin captures stderr to show user-friendly messages.

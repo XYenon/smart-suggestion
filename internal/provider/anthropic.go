@@ -49,35 +49,44 @@ func NewAnthropicProvider() (*AnthropicProvider, error) {
 }
 
 func (p *AnthropicProvider) Fetch(ctx context.Context, input string, systemPrompt string) (string, error) {
+	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
+}
+
+func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	debug.Log("Sending Anthropic request", map[string]any{
 		"model":         p.Model,
 		"system_prompt": systemPrompt,
+		"history":       history,
 		"input":         input,
 	})
+
+	messages := []anthropic.MessageParam{}
+	for _, msg := range history {
+		switch msg.Role {
+		case "user":
+			messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)))
+		case "assistant":
+			messages = append(messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)))
+		}
+	}
+
+	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(input)))
 
 	resp, err := p.Client.Messages.New(
 		ctx,
 		anthropic.MessageNewParams{
 			Model:     anthropic.Model(p.Model),
 			MaxTokens: 1000,
-			System: []anthropic.TextBlockParam{
-				{
-					Text: systemPrompt,
-				},
-			},
-			Messages: []anthropic.MessageParam{
-				anthropic.NewUserMessage(anthropic.NewTextBlock(input)),
-			},
+			System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+			Messages:  messages,
 		},
 	)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to create message: %w", err)
-	}
-
 	debug.Log("Received Anthropic response", map[string]any{
 		"response": resp,
 	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create message: %w", err)
+	}
 
 	if len(resp.Content) == 0 {
 		return "", fmt.Errorf("no content returned from Anthropic API")

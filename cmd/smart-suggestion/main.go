@@ -47,84 +47,92 @@ Example of your full response format:
 2. The previous command 'kubectl get pods' listed the pods and their statuses, but did not show the logs.
 3. The next logical step is to use 'kubectl logs' on the failing pod to diagnose the issue.
 </reasoning>
-=kubectl -n my-namespace logs pod-name-aaa
+=kubectl -n my-namespace logs pod-name-aaa`
 
-IMPORTANT EXAMPLES OF NEW COMMANDS (MUST USE =):
-    * User input: 'list files in current directory';
-      Your response:
-<reasoning>
+// getExampleHistory returns conversation examples as message history
+func getExampleHistory() []provider.Message {
+	return []provider.Message{
+		// Example 1: New command for listing files
+		{Role: "user", Content: "list files in current directory"},
+		{Role: "assistant", Content: `<reasoning>
 1. The user wants to list files.
 2. No previous command.
 3. 'ls' is the command for listing files.
 </reasoning>
-=ls
-    * Shell history: 'ls -l /tmp/smart-suggestion.log';
-      Your response:
-<reasoning>
+=ls`},
+
+		// Example 2: New command after viewing log file details
+		{Role: "user", Content: "Shell history: 'ls -l /tmp/smart-suggestion.log'"},
+		{Role: "assistant", Content: `<reasoning>
 1. The user just listed details of a log file. A common next step is to view the content of that file.
 2. Listing the file does not show its content.
 3. The 'cat' command can be used to display the file content.
 </reasoning>
-=cat /tmp/smart-suggestion.log
-    * Scrollback:
-        # k -n my-namespace get pod
-        NAME           READY   STATUS             RESTARTS         AGE
-        pod-name-aaa   2/3     CrashLoopBackOff   358 (111s ago)   30h
-        pod-name-bbb   2/3     CrashLoopBackOff   358 (3m8s ago)   30h
-      Your response:
-<reasoning>
+=cat /tmp/smart-suggestion.log`},
+
+		// Example 3: New command for CrashLoopBackOff pods
+		{Role: "user", Content: `Scrollback:
+# k -n my-namespace get pod
+NAME           READY   STATUS             RESTARTS         AGE
+pod-name-aaa   2/3     CrashLoopBackOff   358 (111s ago)   30h
+pod-name-bbb   2/3     CrashLoopBackOff   358 (3m8s ago)   30h`},
+		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods in a Kubernetes namespace.
 2. The pods are in 'CrashLoopBackOff', indicating a problem. The user likely wants to see the logs to debug.
 3. The command 'kubectl logs' will show the logs for 'pod-name-aaa'.
 </reasoning>
-=kubectl -n my-namespace logs pod-name-aaa
-    * Scrollback:
-        # k -n my-namespace get pod
-        NAME           READY   STATUS             RESTARTS         AGE
-        pod-name-aaa   3/3     Running            0                30h
-        pod-name-bbb   0/3     Pending            0                30h
-      Your response:
-<reasoning>
+=kubectl -n my-namespace logs pod-name-aaa`},
+
+		// Example 4: New command for pending pod
+		{Role: "user", Content: `Scrollback:
+# k -n my-namespace get pod
+NAME           READY   STATUS             RESTARTS         AGE
+pod-name-aaa   3/3     Running            0                30h
+pod-name-bbb   0/3     Pending            0                30h`},
+		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods. One pod is 'Pending'.
 2. The 'get pod' command doesn't say why it's pending.
 3. 'kubectl describe pod' will give more details about why the pod is pending.
 </reasoning>
-=kubectl -n my-namespace describe pod pod-name-bbb
-    * Scrollback:
-        # k get node
-        NAME      STATUS   ROLES    AGE   VERSION
-        node-aaa  Ready    <none>   3h    v1.25.3
-        node-bbb  NotReady <none>   3h    v1.25.3
-      Your response:
-<reasoning>
+=kubectl -n my-namespace describe pod pod-name-bbb`},
+
+		// Example 5: New command for NotReady node
+		{Role: "user", Content: `Scrollback:
+# k get node
+NAME      STATUS   ROLES    AGE   VERSION
+node-aaa  Ready    <none>   3h    v1.25.3
+node-bbb  NotReady <none>   3h    v1.25.3`},
+		{Role: "assistant", Content: `<reasoning>
 1. The user is checking Kubernetes nodes. One node is 'NotReady'.
 2. 'get node' does not show the reason for the 'NotReady' status.
 3. 'kubectl describe node' will provide detailed events and information about the node's status.
 </reasoning>
-=kubectl describe node node-bbb
+=kubectl describe node node-bbb`},
 
-IMPORTANT EXAMPLES OF COMPLETIONS (MUST USE +):
-    * User input: 'cd /tm';
-      Your response:
-<reasoning>
+		// Example 6: Completion for cd command
+		{Role: "user", Content: "cd /tm"},
+		{Role: "assistant", Content: `<reasoning>
 1. The user wants to change directory to a temporary folder.
 2. The user has typed '/tm' which is likely an abbreviation for '/tmp'.
 3. Completing with 'p' will form '/tmp'.
 </reasoning>
-+p
-    * Scrollback:
-        # k -n my-namespace get pod
-        NAME           READY   STATUS             RESTARTS         AGE
-        pod-name-aaa   3/3     Running            0                30h
-        pod-name-bbb   0/3     Pending            0                30h
-	  User input: 'k -n'
-      Your response:
-<reasoning>
++p`},
+
+		// Example 7: Completion for kubectl command
+		{Role: "user", Content: `Scrollback:
+# k -n my-namespace get pod
+NAME           READY   STATUS             RESTARTS         AGE
+pod-name-aaa   3/3     Running            0                30h
+pod-name-bbb   0/3     Pending            0                30h
+User input: k -n`},
+		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods. One pod is 'Pending'. They started typing a command.
 2. 'get pod' was useful but now they want to investigate 'pod-name-bbb'.
 3. I will complete the command to describe the pending pod.
 </reasoning>
-+ my-namespace describe pod pod-name-bbb`
++ my-namespace describe pod pod-name-bbb`},
+	}
+}
 
 var (
 	Version   = "dev"
@@ -259,7 +267,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 	case "anthropic":
 		p, err = provider.NewAnthropicProvider()
 	case "gemini":
-		p, err = provider.NewGeminiProvider()
+		p, err = provider.NewGeminiProvider(cmd.Context())
 	default:
 		err = fmt.Errorf("unsupported provider: %s (valid: openai, azure_openai, anthropic, gemini)", providerName)
 	}
@@ -275,7 +283,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	suggestion, err := p.Fetch(cmd.Context(), input, completePrompt)
+	suggestion, err := p.FetchWithHistory(cmd.Context(), input, completePrompt, getExampleHistory())
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
 			"error":    err.Error(),

@@ -5,8 +5,14 @@ import (
 	"strings"
 )
 
+type Message struct {
+	Role    string // "user" or "assistant"
+	Content string
+}
+
 type Provider interface {
 	Fetch(ctx context.Context, input string, systemPrompt string) (string, error)
+	FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error)
 }
 
 func ParseAndExtractCommand(response string) string {
