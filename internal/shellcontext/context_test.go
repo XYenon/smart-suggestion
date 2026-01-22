@@ -548,3 +548,130 @@ func TestGetSystemInfo_TermuxWithoutVersion(t *testing.T) {
 		t.Errorf("expected system info to contain 'Android with Termux', got %q", got)
 	}
 }
+
+func TestGetAvailableCommands(t *testing.T) {
+	// Test with environment variable (primary method)
+	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	defer func() {
+		if originalCommands != "" {
+			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
+		} else {
+			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+		}
+	}()
+
+	// Test with space-separated commands
+	testCommands := "ls cat grep git docker kubectl npm yarn go python node curl wget ssh scp rsync tar gzip unzip vim nano emacs make cmake gcc clang java javac mvn gradle"
+	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
+
+	commands, err := getAvailableCommands()
+	if err != nil {
+		t.Fatalf("getAvailableCommands() failed: %v", err)
+	}
+
+	if commands != testCommands {
+		t.Errorf("getAvailableCommands() should return env var content, got: %s, expected: %s", commands, testCommands)
+	}
+
+	// Test when environment variable is not set
+	os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+
+	commands, err = getAvailableCommands()
+	if err != nil {
+		t.Errorf("getAvailableCommands() should not return error when no env var is set, got: %v", err)
+	}
+
+	if commands != "" {
+		t.Errorf("getAvailableCommands() should return empty string when no env var is set, got: %s", commands)
+	}
+}
+
+func TestBuildContextInfoWithCommands(t *testing.T) {
+	// Set up environment variable for commands
+	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	defer func() {
+		if originalCommands != "" {
+			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
+		} else {
+			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+		}
+	}()
+
+	testCommands := "ls cat grep git docker kubectl npm yarn go python"
+	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
+
+	// Test that BuildContextInfo includes available commands
+	context, err := BuildContextInfo(10, "")
+	if err != nil {
+		t.Fatalf("BuildContextInfo() failed: %v", err)
+	}
+
+	if !strings.Contains(context, "# Available PATH commands:") {
+		t.Errorf("BuildContextInfo() should include available PATH commands section")
+	}
+
+	if !strings.Contains(context, "ls cat grep git docker") {
+		t.Errorf("BuildContextInfo() should include the commands from environment variable")
+	}
+}
+
+func TestBuildContextInfoWithoutCommands(t *testing.T) {
+	// Test without environment variable
+	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	defer func() {
+		if originalCommands != "" {
+			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
+		} else {
+			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+		}
+	}()
+
+	os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+
+	// Test that BuildContextInfo works without available commands
+	context, err := BuildContextInfo(10, "")
+	if err != nil {
+		t.Fatalf("BuildContextInfo() failed: %v", err)
+	}
+
+	// Should not include available commands section when env var is not set
+	if strings.Contains(context, "# Available PATH commands:") {
+		t.Errorf("BuildContextInfo() should not include available PATH commands section when env var is not set")
+	}
+}
+
+func TestGetAvailableCommandsWithLargeList(t *testing.T) {
+	// Test with a very large list of commands to ensure no truncation
+	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	defer func() {
+		if originalCommands != "" {
+			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
+		} else {
+			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
+		}
+	}()
+
+	// Create a large list of commands (100+ commands) with space separation
+	var commandList []string
+	for i := 0; i < 100; i++ {
+		commandList = append(commandList, "cmd"+string(rune('a'+i%26))+string(rune('0'+i/26)))
+	}
+	testCommands := strings.Join(commandList, " ")
+
+	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
+
+	commands, err := getAvailableCommands()
+	if err != nil {
+		t.Fatalf("getAvailableCommands() failed with large list: %v", err)
+	}
+
+	if commands != testCommands {
+		t.Errorf("getAvailableCommands() should return all commands without truncation")
+	}
+
+	// Verify all 100 commands are present
+	returnedCommands := strings.Split(commands, " ")
+	if len(returnedCommands) != 100 {
+		t.Errorf("Expected 100 commands, got %d", len(returnedCommands))
+	}
+}

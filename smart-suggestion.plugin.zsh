@@ -123,6 +123,7 @@ function _fetch_suggestions() {
 
     # Capture shell context to avoid spawning interactive shells in Go binary
     local shell_aliases=$(alias 2>/dev/null)
+    local available_commands="${(k)commands}"
     local shell_history=$(fc -ln -$SMART_SUGGESTION_HISTORY_LINES 2>/dev/null)
 
     # Prepare scrollback file args (use array for proper argument handling)
@@ -131,6 +132,7 @@ function _fetch_suggestions() {
 
     # Call the Go binary with proper arguments
     SMART_SUGGESTION_ALIASES="$shell_aliases" \
+    SMART_SUGGESTION_COMMANDS="$available_commands" \
     SMART_SUGGESTION_HISTORY="$shell_history" \
     "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \

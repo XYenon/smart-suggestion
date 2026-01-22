@@ -56,6 +56,12 @@ func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error
 		debug.Log("Failed to get aliases", map[string]any{"error": err.Error()})
 	}
 
+	if commands, err := getAvailableCommands(); err == nil && commands != "" {
+		parts = append(parts, "\n\n# Available PATH commands:\n\n", commands)
+	} else if err != nil {
+		debug.Log("Failed to get available commands", map[string]any{"error": err.Error()})
+	}
+
 	if history, err := getHistory(); err == nil && history != "" {
 		parts = append(parts, "\n\n# Shell history:\n\n", history)
 	} else if err != nil {
@@ -132,6 +138,14 @@ func getAliases() (string, error) {
 	aliases := os.Getenv("SMART_SUGGESTION_ALIASES")
 	if aliases != "" {
 		return strings.TrimSpace(aliases), nil
+	}
+	return "", nil
+}
+
+func getAvailableCommands() (string, error) {
+	commands := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	if commands != "" {
+		return strings.TrimSpace(commands), nil
 	}
 	return "", nil
 }
