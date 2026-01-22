@@ -153,11 +153,12 @@ function _show_loading_animation() {
     local i=1
 
     cleanup() {
-        kill $pid
-        tput -S <<<"bicr ed rc cnorm"
+        kill $pid 2>/dev/null
+        # Clear the line and restore cursor
+        tput -S <<<"cr el cnorm"
         touch "${SMART_SUGGESTION_CACHE_DIR}/canceled"
     }
-    trap cleanup SIGINT
+    trap cleanup SIGINT EXIT
 
     tput -S <<<"sc civis"
     while kill -0 $pid 2>/dev/null; do
@@ -174,8 +175,9 @@ function _show_loading_animation() {
         sleep $interval
     done
 
-    tput cnorm
-    trap - SIGINT
+    # Always clean up when the loop exits
+    tput -S <<<"cr el cnorm"
+    trap - SIGINT EXIT
 }
 
 function _do_smart_suggestion() {
@@ -206,6 +208,10 @@ function _do_smart_suggestion() {
     _show_loading_animation $pid
     local response_code=$?
 
+    # Ensure cursor is visible and line is cleared after animation
+    tput cnorm
+    zle -R ""
+
     if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
         if command -v jq >/dev/null 2>&1; then
             jq -n --arg date "$(date)" --arg log "Fetched message" --arg input "$input" --arg response_code "$response_code" \
@@ -223,9 +229,15 @@ function _do_smart_suggestion() {
     local message
     read -u $OUTPUT_FD -d '' message || true
     exec {OUTPUT_FD}<&-
+
     if [[ -z "$message" ]]; then
         _zsh_autosuggest_clear
-        echo $(cat "${SMART_SUGGESTION_CACHE_DIR}/error" 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
+        local error_msg=$(cat "${SMART_SUGGESTION_CACHE_DIR}/error" 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
+
+        # Use zle -M to display the error message properly
+        zle -M "$error_msg"
+
+        # The user's input remains in BUFFER and CURSOR automatically
         return 1
     fi
 
