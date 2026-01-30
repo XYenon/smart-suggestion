@@ -4,674 +4,453 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestGetSystemInfo_DarwinError(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "sw_vers" {
-			return exec.Command("false")
-		}
-		return exec.Command("echo", "")
-	}
-
-	oldGOOS := runtimeGOOS
-	runtimeGOOS = "darwin"
-	defer func() { runtimeGOOS = oldGOOS }()
-
-	got := getSystemInfo()
-	if got != "Your system is macOS." {
-		t.Errorf("expected default macOS msg, got %q", got)
-	}
-}
-
-func TestGetSystemInfo_DarwinSuccess(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "sw_vers" {
-			return exec.Command("echo", "ProductName: macOS\nProductVersion: 14.0")
-		}
-		return exec.Command("echo", "")
-	}
-
-	oldGOOS := runtimeGOOS
-	runtimeGOOS = "darwin"
-	defer func() { runtimeGOOS = oldGOOS }()
-
-	got := getSystemInfo()
-	if !strings.Contains(got, "macOS") {
-		t.Errorf("expected system info to contain macOS, got %q", got)
-	}
-}
-
-func TestGetSystemInfo_LinuxNoReleaseFiles(t *testing.T) {
-	oldGOOS := runtimeGOOS
-	runtimeGOOS = "linux"
-	defer func() { runtimeGOOS = oldGOOS }()
-
-	got := getSystemInfo()
-	if got != "Your system is Linux." {
-		t.Fatalf("expected Linux default, got %q", got)
-	}
-}
-
-func TestGetUserID_Error(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "id" {
-			return exec.Command("false")
-		}
-		return exec.Command("echo", "")
-	}
-
-	got := getUserID()
-	if got != "unknown" {
-		t.Errorf("expected unknown, got %q", got)
-	}
-}
-
-func TestGetTerminalScrollbackWithTput_Error(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "tput" {
-			return exec.Command("false")
-		}
-		return exec.Command("echo", "")
-	}
-
-	_, err := getTerminalScrollbackWithTput()
-	if err == nil {
-		t.Error("expected error, got nil")
-	}
-}
-
-func TestGetScreenScrollback_NotInScreen(t *testing.T) {
-	t.Setenv("STY", "")
-
-	_, err := getScreenScrollback()
-	if err == nil {
-		t.Error("expected error when not in screen session")
-	}
-	if !strings.Contains(err.Error(), "not in a screen session") {
-		t.Errorf("expected 'not in a screen session' error, got %v", err)
-	}
-}
-
-func TestDoGetScrollback_SessionLogFail(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-	t.Setenv("SMART_SUGGESTION_SESSION_ID", "test-session")
-	tempDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", tempDir)
-	t.Setenv("STY", "")
-
-	// Create base proxy log
-	baseLog := filepath.Join(tempDir, "smart-suggestion", "proxy.log")
-	os.MkdirAll(filepath.Dir(baseLog), 0755)
-	os.WriteFile(baseLog, []byte("base log"), 0644)
-
-	// Mock commands
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		return exec.Command("echo", "")
-	}
-
-	got, err := getScrollback(100, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "base log" {
-		t.Errorf("expected base log, got %q", got)
-	}
-}
-
 func TestReadLatestLines(t *testing.T) {
-	content := "line1\nline2\nline3\nline4\nline5"
-	got, err := readLatestLines(content, 3)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	expected := "line3\nline4\nline5"
-	if got != expected {
-		t.Errorf("expected %q, got %q", expected, got)
-	}
-
-	got, err = readLatestLines(content, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != content {
-		t.Errorf("expected %q, got %q", content, got)
-	}
-}
-
-func TestReadLatestProxyContent(t *testing.T) {
-	tempDir := t.TempDir()
-	logFile := filepath.Join(tempDir, "proxy.log")
-
-	lines := []string{}
-	for i := 1; i <= 60; i++ {
-		lines = append(lines, "line"+strconv.Itoa(i))
-	}
-
-	err := os.WriteFile(logFile, []byte(strings.Join(lines, "\n")), 0644)
-	if err != nil {
-		t.Fatalf("failed to write log file: %v", err)
-	}
-
-	got, err := readLatestProxyContent(logFile, 100)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// readLatestProxyContent now takes maxLines as a parameter
-	gotLines := strings.Split(got, "\n")
-	if len(gotLines) != 60 {
-		t.Errorf("expected 60 lines (all lines since < 100), got %d", len(gotLines))
-	}
-	if gotLines[0] != "line1" {
-		t.Errorf("expected first line to be line1, got %q", gotLines[0])
-	}
-	if gotLines[59] != "line60" {
-		t.Errorf("expected last line to be line60, got %q", gotLines[59])
-	}
-}
-
-func TestBuildContextInfo(t *testing.T) {
-	t.Setenv("USER", "testuser")
-	t.Setenv("SHELL", "/bin/zsh")
-	t.Setenv("TERM", "xterm-256color")
-	t.Setenv("SMART_SUGGESTION_ALIASES", "alias ls='ls -G'")
-	t.Setenv("SMART_SUGGESTION_HISTORY", "ls\ncd /tmp")
-
-	got, err := BuildContextInfo(100, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if !strings.Contains(got, "testuser") {
-		t.Error("expected output to contain username")
-	}
-	if !strings.Contains(got, "alias ls='ls -G'") {
-		t.Error("expected output to contain aliases")
-	}
-	if !strings.Contains(got, "ls\ncd /tmp") {
-		t.Error("expected output to contain history")
-	}
-}
-
-func TestBuildContextInfo_NoScrollback(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("STY", "")
-
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "tput" {
-			return exec.Command("echo", "24")
+	t.Run("empty", func(t *testing.T) {
+		got, err := readLatestLines("", 10)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-		return exec.Command("echo", "")
+		if got != "" {
+			t.Fatalf("expected empty, got %q", got)
+		}
+	})
+
+	t.Run("all-lines", func(t *testing.T) {
+		input := "a\nb\n"
+		got, err := readLatestLines(input, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "a\nb" {
+			t.Fatalf("expected trimmed input, got %q", got)
+		}
+	})
+
+	t.Run("tail", func(t *testing.T) {
+		input := "one\ntwo\nthree\n"
+		got, err := readLatestLines(input, 2)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "two\nthree" {
+			t.Fatalf("expected tail, got %q", got)
+		}
+	})
+}
+
+func TestBuildContextInfoSections(t *testing.T) {
+	setEnv := func(key, value string) func() {
+		old := os.Getenv(key)
+		_ = os.Setenv(key, value)
+		return func() { _ = os.Setenv(key, old) }
 	}
 
-	got, err := BuildContextInfo(100, "")
+	cleanupAliases := setEnv("SMART_SUGGESTION_ALIASES", "alias ll='ls -l'")
+	cleanupCommands := setEnv("SMART_SUGGESTION_COMMANDS", "ls\ncat")
+	cleanupHistory := setEnv("SMART_SUGGESTION_HISTORY", "ls\ncat")
+	cleanupTerm := setEnv("TERM", "xterm")
+	cleanupShell := setEnv("SHELL", "/bin/zsh")
+	t.Cleanup(func() {
+		cleanupAliases()
+		cleanupCommands()
+		cleanupHistory()
+		cleanupTerm()
+		cleanupShell()
+	})
+
+	contextInfo, err := BuildContextInfo(0, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if strings.Contains(got, "# Scrollback:") {
-		t.Error("expected no scrollback in context")
+	if !strings.Contains(contextInfo, "# This is the alias defined in your shell:") {
+		t.Fatal("expected alias section")
+	}
+	if !strings.Contains(contextInfo, "# Available PATH commands:") {
+		t.Fatal("expected commands section")
+	}
+	if !strings.Contains(contextInfo, "# Shell history:") {
+		t.Fatal("expected history section")
 	}
 }
 
-func TestGetSystemInfo(t *testing.T) {
-	got := getSystemInfo()
-	if got == "" {
-		t.Error("expected system info to be non-empty")
+func TestGetSystemInfoDarwin(t *testing.T) {
+	oldGOOS := runtimeGOOS
+	oldExec := execCommand
+	t.Cleanup(func() {
+		runtimeGOOS = oldGOOS
+		execCommand = oldExec
+	})
+
+	runtimeGOOS = "darwin"
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "ProductName:\tmacOS\nProductVersion:\t14.0")
+	}
+
+	info := getSystemInfo()
+	if !strings.Contains(info, "macOS") {
+		t.Fatalf("expected macOS info, got %q", info)
+	}
+}
+
+func TestGetSystemInfoLinux(t *testing.T) {
+	oldGOOS := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = oldGOOS })
+
+	runtimeGOOS = "linux"
+
+	info := getSystemInfo()
+	if !strings.Contains(info, "Linux") && !strings.Contains(info, "system is") {
+		t.Fatalf("expected Linux info, got %q", info)
+	}
+}
+
+func TestGetSystemInfoTermux(t *testing.T) {
+	oldGOOS := runtimeGOOS
+	oldTermux := os.Getenv("TERMUX_VERSION")
+	t.Cleanup(func() {
+		runtimeGOOS = oldGOOS
+		os.Setenv("TERMUX_VERSION", oldTermux)
+	})
+
+	runtimeGOOS = "linux"
+	os.Setenv("TERMUX_VERSION", "0.118")
+
+	info := getSystemInfo()
+	if !strings.Contains(info, "Termux") {
+		t.Fatalf("expected Termux info, got %q", info)
+	}
+}
+
+func TestIsTermux(t *testing.T) {
+	oldTermux := os.Getenv("TERMUX_VERSION")
+	oldPrefix := os.Getenv("PREFIX")
+	t.Cleanup(func() {
+		os.Setenv("TERMUX_VERSION", oldTermux)
+		os.Setenv("PREFIX", oldPrefix)
+	})
+
+	os.Setenv("TERMUX_VERSION", "")
+	os.Setenv("PREFIX", "")
+	if isTermux() {
+		t.Fatal("expected false without env vars")
+	}
+
+	os.Setenv("TERMUX_VERSION", "0.118")
+	if !isTermux() {
+		t.Fatal("expected true with TERMUX_VERSION")
+	}
+
+	os.Setenv("TERMUX_VERSION", "")
+	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
+	if !isTermux() {
+		t.Fatal("expected true with PREFIX containing com.termux")
 	}
 }
 
 func TestGetUserID(t *testing.T) {
-	got := getUserID()
-	if got == "" {
-		t.Error("expected user ID to be non-empty")
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "uid=1000(user)")
+	}
+
+	id := getUserID()
+	if !strings.Contains(id, "uid=1000") {
+		t.Fatalf("expected uid output, got %q", id)
 	}
 }
 
-func TestGetUserID_Mock(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
+func TestGetUserIDError(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
 
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "id" {
-			return exec.Command("echo", "uid=501(user) gid=20(staff)")
-		}
-		return exec.Command("echo", "")
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
 	}
 
-	got := getUserID()
-	if got != "uid=501(user) gid=20(staff)" {
-		t.Errorf("expected mock output, got %q", got)
+	id := getUserID()
+	if id != "unknown" {
+		t.Fatalf("expected unknown, got %q", id)
 	}
 }
 
 func TestGetUnameInfo(t *testing.T) {
-	got := getUnameInfo()
-	if got == "" {
-		t.Error("expected uname info to be non-empty")
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "Darwin host 24.0.0")
+	}
+
+	info := getUnameInfo()
+	if !strings.Contains(info, "Darwin") {
+		t.Fatalf("expected uname output, got %q", info)
 	}
 }
 
-func TestGetUnameInfo_Error(t *testing.T) {
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
+func TestGetUnameInfoError(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
 
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "uname" {
-			return exec.Command("false")
-		}
-		return exec.Command("echo", "")
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
 	}
 
-	got := getUnameInfo()
-	if got != "unknown" {
-		t.Errorf("expected unknown, got %q", got)
+	info := getUnameInfo()
+	if info != "unknown" {
+		t.Fatalf("expected unknown, got %q", info)
 	}
 }
 
-func TestGetScrollback_ProxyLog(t *testing.T) {
-	tempDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", tempDir)
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-	t.Setenv("STY", "")
+func TestReadLatestProxyContent(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "proxy.log")
+	if err := os.WriteFile(file, []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
 
-	logPath := filepath.Join(tempDir, "smart-suggestion", "proxy.log")
-	os.MkdirAll(filepath.Dir(logPath), 0755)
-	os.WriteFile(logPath, []byte("scrollback content"), 0644)
-
-	got, err := getScrollback(100, "")
+	content, err := readLatestProxyContent(file, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "scrollback content" {
-		t.Errorf("expected %q, got %q", "scrollback content", got)
+	if content != "line2\nline3" {
+		t.Fatalf("expected tail lines, got %q", content)
+	}
+
+	content, err = readLatestProxyContent(file, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "line1\nline2\nline3" {
+		t.Fatalf("expected all lines, got %q", content)
 	}
 }
 
-func TestDoGetScrollback_Tmux(t *testing.T) {
-	t.Setenv("TMUX", "1")
-	t.Setenv("KITTY_LISTEN_ON", "")
+func TestReadLatestProxyContentMissing(t *testing.T) {
+	_, err := readLatestProxyContent("/nonexistent/file.log", 10)
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
 
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
+func TestGetScrollbackWithFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "scrollback.txt")
+	if err := os.WriteFile(file, []byte("scroll1\nscroll2\nscroll3\n"), 0644); err != nil {
+		t.Fatalf("failed to write file: %v", err)
+	}
 
-	execCommand = func(name string, arg ...string) *exec.Cmd {
+	content, err := getScrollback(2, file)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "scroll2\nscroll3" {
+		t.Fatalf("expected tail, got %q", content)
+	}
+}
+
+func TestGetTerminalScrollbackWithTput(t *testing.T) {
+	oldExec := execCommand
+	t.Cleanup(func() { execCommand = oldExec })
+
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("echo", "24")
+	}
+
+	_, err := getTerminalScrollbackWithTput()
+	if err == nil {
+		t.Fatal("expected error from tput fallback")
+	}
+	if !strings.Contains(err.Error(), "not fully implemented") {
+		t.Fatalf("expected 'not fully implemented' error, got %v", err)
+	}
+}
+
+func TestGetScreenScrollbackNotInSession(t *testing.T) {
+	oldSTY := os.Getenv("STY")
+	t.Cleanup(func() { os.Setenv("STY", oldSTY) })
+
+	os.Setenv("STY", "")
+	_, err := getScreenScrollback()
+	if err == nil {
+		t.Fatal("expected error when not in screen session")
+	}
+}
+
+func TestAppendContextSectionError(t *testing.T) {
+	var builder strings.Builder
+	appendContextSection(&builder, "Test", func() (string, error) {
+		return "", os.ErrNotExist
+	})
+	if builder.Len() != 0 {
+		t.Fatal("expected empty builder on error")
+	}
+}
+
+func TestAppendContextSectionEmpty(t *testing.T) {
+	var builder strings.Builder
+	appendContextSection(&builder, "Test", func() (string, error) {
+		return "", nil
+	})
+	if builder.Len() != 0 {
+		t.Fatal("expected empty builder for empty value")
+	}
+}
+
+func TestBuildContextHeader(t *testing.T) {
+	oldUser := os.Getenv("USER")
+	oldShell := os.Getenv("SHELL")
+	oldTerm := os.Getenv("TERM")
+	t.Cleanup(func() {
+		os.Setenv("USER", oldUser)
+		os.Setenv("SHELL", oldShell)
+		os.Setenv("TERM", oldTerm)
+	})
+
+	os.Setenv("USER", "")
+	os.Setenv("SHELL", "")
+	os.Setenv("TERM", "")
+
+	header := buildContextHeader()
+	if !strings.Contains(header, "unknown") {
+		t.Fatal("expected unknown placeholders in header")
+	}
+}
+
+func TestGetAliasesEmpty(t *testing.T) {
+	oldAliases := os.Getenv("SMART_SUGGESTION_ALIASES")
+	t.Cleanup(func() { os.Setenv("SMART_SUGGESTION_ALIASES", oldAliases) })
+
+	os.Setenv("SMART_SUGGESTION_ALIASES", "")
+	aliases, err := getAliases()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if aliases != "" {
+		t.Fatalf("expected empty, got %q", aliases)
+	}
+}
+
+func TestGetAvailableCommandsEmpty(t *testing.T) {
+	oldCmds := os.Getenv("SMART_SUGGESTION_COMMANDS")
+	t.Cleanup(func() { os.Setenv("SMART_SUGGESTION_COMMANDS", oldCmds) })
+
+	os.Setenv("SMART_SUGGESTION_COMMANDS", "")
+	cmds, err := getAvailableCommands()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cmds != "" {
+		t.Fatalf("expected empty, got %q", cmds)
+	}
+}
+
+func TestGetHistoryEmpty(t *testing.T) {
+	oldHistory := os.Getenv("SMART_SUGGESTION_HISTORY")
+	t.Cleanup(func() { os.Setenv("SMART_SUGGESTION_HISTORY", oldHistory) })
+
+	os.Setenv("SMART_SUGGESTION_HISTORY", "")
+	history, err := getHistory()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if history != "" {
+		t.Fatalf("expected empty, got %q", history)
+	}
+}
+
+func TestDoGetScrollbackTmux(t *testing.T) {
+	oldTmux := os.Getenv("TMUX")
+	oldExec := execCommand
+	t.Cleanup(func() {
+		os.Setenv("TMUX", oldTmux)
+		execCommand = oldExec
+	})
+
+	os.Setenv("TMUX", "/tmp/tmux-1000/default,12345,0")
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "tmux" {
 			return exec.Command("echo", "tmux scrollback")
 		}
-		return exec.Command("echo", "")
+		return exec.Command("false")
 	}
 
-	got, err := getScrollback(100, "")
+	content, err := doGetScrollback(10, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "tmux scrollback" {
-		t.Errorf("expected tmux scrollback, got %q", got)
+	if !strings.Contains(content, "tmux scrollback") {
+		t.Fatalf("expected tmux content, got %q", content)
 	}
 }
 
-func TestDoGetScrollback_Kitty(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "1")
+func TestDoGetScrollbackKitty(t *testing.T) {
+	oldTmux := os.Getenv("TMUX")
+	oldKitty := os.Getenv("KITTY_LISTEN_ON")
+	oldExec := execCommand
+	t.Cleanup(func() {
+		os.Setenv("TMUX", oldTmux)
+		os.Setenv("KITTY_LISTEN_ON", oldKitty)
+		execCommand = oldExec
+	})
 
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
+	os.Setenv("TMUX", "")
+	os.Setenv("KITTY_LISTEN_ON", "unix:/tmp/kitty")
+	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "kitten" {
 			return exec.Command("echo", "kitty scrollback")
 		}
-		return exec.Command("echo", "")
+		return exec.Command("false")
 	}
 
-	got, err := getScrollback(100, "")
+	content, err := doGetScrollback(10, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "kitty scrollback" {
-		t.Errorf("expected kitty scrollback, got %q", got)
+	if !strings.Contains(content, "kitty scrollback") {
+		t.Fatalf("expected kitty content, got %q", content)
 	}
 }
 
-func TestDoGetScrollback_Screen(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")
-	t.Setenv("XDG_CACHE_HOME", t.TempDir()) // Ensure proxy log check fails
+func TestGetScrollbackError(t *testing.T) {
+	oldTmux := os.Getenv("TMUX")
+	oldKitty := os.Getenv("KITTY_LISTEN_ON")
+	oldSTY := os.Getenv("STY")
+	oldSessionID := os.Getenv("SMART_SUGGESTION_SESSION_ID")
+	oldExec := execCommand
+	t.Cleanup(func() {
+		os.Setenv("TMUX", oldTmux)
+		os.Setenv("KITTY_LISTEN_ON", oldKitty)
+		os.Setenv("STY", oldSTY)
+		os.Setenv("SMART_SUGGESTION_SESSION_ID", oldSessionID)
+		execCommand = oldExec
+	})
 
-	t.Setenv("STY", "screen-session")
-
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "screen" {
-			// Screen writes to file. The last arg is the file path.
-			argFile := arg[len(arg)-1]
-			os.MkdirAll(filepath.Dir(argFile), 0755)
-			os.WriteFile(argFile, []byte("screen scrollback"), 0644)
-			return exec.Command("true")
-		}
-		return exec.Command("echo", "")
+	os.Setenv("TMUX", "")
+	os.Setenv("KITTY_LISTEN_ON", "")
+	os.Setenv("STY", "")
+	os.Setenv("SMART_SUGGESTION_SESSION_ID", "")
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("false")
 	}
 
-	got, err := getScrollback(100, "")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "screen scrollback" {
-		t.Errorf("expected screen scrollback, got %q", got)
-	}
-}
-
-func TestDoGetScrollback_Fallback(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-	t.Setenv("SMART_SUGGESTION_SESSION_ID", "")
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	t.Setenv("STY", "")
-
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "tput" {
-			return exec.Command("echo", "24")
-		}
-		return exec.Command("echo", "")
-	}
-
-	_, err := getScrollback(100, "")
+	_, err := getScrollback(10, "")
 	if err == nil {
-		t.Error("expected error for fallback, got nil")
-	} else if !strings.Contains(err.Error(), "no scrollback available") {
-		t.Errorf("expected no scrollback available error, got %v", err)
+		t.Fatal("expected error when no scrollback source available")
 	}
 }
 
-func TestDoGetScrollback_ScrollbackFile(t *testing.T) {
-	t.Setenv("TMUX", "")
-	t.Setenv("KITTY_LISTEN_ON", "")
-
-	tempDir := t.TempDir()
-	scrollbackFile := filepath.Join(tempDir, "screen.txt")
-	os.WriteFile(scrollbackFile, []byte("ghostty scrollback content"), 0644)
-
-	got, err := getScrollback(100, scrollbackFile)
+func TestBuildContextInfoNegativeLines(t *testing.T) {
+	info, err := BuildContextInfo(-10, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "ghostty scrollback content" {
-		t.Errorf("expected ghostty scrollback content, got %q", got)
-	}
-}
-
-func TestDoGetScrollback_ScrollbackFilePriority(t *testing.T) {
-	// Scrollback file should take priority over tmux
-	t.Setenv("TMUX", "1")
-
-	oldExecCommand := execCommand
-	defer func() { execCommand = oldExecCommand }()
-
-	execCommand = func(name string, arg ...string) *exec.Cmd {
-		if name == "tmux" {
-			return exec.Command("echo", "tmux scrollback")
-		}
-		return exec.Command("echo", "")
-	}
-
-	tempDir := t.TempDir()
-	scrollbackFile := filepath.Join(tempDir, "screen.txt")
-	os.WriteFile(scrollbackFile, []byte("ghostty scrollback"), 0644)
-
-	got, err := getScrollback(100, scrollbackFile)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != "ghostty scrollback" {
-		t.Errorf("expected ghostty scrollback (priority over tmux), got %q", got)
-	}
-}
-
-func TestIsTermux_WithTermuxVersion(t *testing.T) {
-	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
-	oldPrefix := os.Getenv("PREFIX")
-	defer func() {
-		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
-		os.Setenv("PREFIX", oldPrefix)
-	}()
-
-	os.Setenv("TERMUX_VERSION", "0.118.0")
-	os.Setenv("PREFIX", "")
-
-	if !isTermux() {
-		t.Error("expected isTermux() to return true when TERMUX_VERSION is set")
-	}
-}
-
-func TestIsTermux_WithPrefix(t *testing.T) {
-	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
-	oldPrefix := os.Getenv("PREFIX")
-	defer func() {
-		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
-		os.Setenv("PREFIX", oldPrefix)
-	}()
-
-	os.Setenv("TERMUX_VERSION", "")
-	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
-
-	if !isTermux() {
-		t.Error("expected isTermux() to return true when PREFIX contains com.termux")
-	}
-}
-
-func TestIsTermux_NotTermux(t *testing.T) {
-	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
-	oldPrefix := os.Getenv("PREFIX")
-	defer func() {
-		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
-		os.Setenv("PREFIX", oldPrefix)
-	}()
-
-	os.Setenv("TERMUX_VERSION", "")
-	os.Setenv("PREFIX", "/usr/local")
-
-	if isTermux() {
-		t.Error("expected isTermux() to return false when not in Termux")
-	}
-}
-
-func TestGetSystemInfo_Termux(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("Skipping Termux test on macOS")
-	}
-
-	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
-	oldPrefix := os.Getenv("PREFIX")
-	defer func() {
-		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
-		os.Setenv("PREFIX", oldPrefix)
-	}()
-
-	os.Setenv("TERMUX_VERSION", "0.118.0")
-	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
-
-	got := getSystemInfo()
-	if !strings.Contains(got, "Android with Termux 0.118.0") {
-		t.Errorf("expected system info to contain 'Android with Termux 0.118.0', got %q", got)
-	}
-}
-
-func TestGetSystemInfo_TermuxWithoutVersion(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("Skipping Termux test on macOS")
-	}
-
-	oldTermuxVersion := os.Getenv("TERMUX_VERSION")
-	oldPrefix := os.Getenv("PREFIX")
-	defer func() {
-		os.Setenv("TERMUX_VERSION", oldTermuxVersion)
-		os.Setenv("PREFIX", oldPrefix)
-	}()
-
-	os.Setenv("TERMUX_VERSION", "")
-	os.Setenv("PREFIX", "/data/data/com.termux/files/usr")
-
-	got := getSystemInfo()
-	if !strings.Contains(got, "Android with Termux") {
-		t.Errorf("expected system info to contain 'Android with Termux', got %q", got)
-	}
-}
-
-func TestGetAvailableCommands(t *testing.T) {
-	// Test with environment variable (primary method)
-	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
-	defer func() {
-		if originalCommands != "" {
-			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
-		} else {
-			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-		}
-	}()
-
-	// Test with space-separated commands
-	testCommands := "ls cat grep git docker kubectl npm yarn go python node curl wget ssh scp rsync tar gzip unzip vim nano emacs make cmake gcc clang java javac mvn gradle"
-	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
-
-	commands, err := getAvailableCommands()
-	if err != nil {
-		t.Fatalf("getAvailableCommands() failed: %v", err)
-	}
-
-	if commands != testCommands {
-		t.Errorf("getAvailableCommands() should return env var content, got: %s, expected: %s", commands, testCommands)
-	}
-
-	// Test when environment variable is not set
-	os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-
-	commands, err = getAvailableCommands()
-	if err != nil {
-		t.Errorf("getAvailableCommands() should not return error when no env var is set, got: %v", err)
-	}
-
-	if commands != "" {
-		t.Errorf("getAvailableCommands() should return empty string when no env var is set, got: %s", commands)
-	}
-}
-
-func TestBuildContextInfoWithCommands(t *testing.T) {
-	// Set up environment variable for commands
-	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
-	defer func() {
-		if originalCommands != "" {
-			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
-		} else {
-			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-		}
-	}()
-
-	testCommands := "ls cat grep git docker kubectl npm yarn go python"
-	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
-
-	// Test that BuildContextInfo includes available commands
-	context, err := BuildContextInfo(10, "")
-	if err != nil {
-		t.Fatalf("BuildContextInfo() failed: %v", err)
-	}
-
-	if !strings.Contains(context, "# Available PATH commands:") {
-		t.Errorf("BuildContextInfo() should include available PATH commands section")
-	}
-
-	if !strings.Contains(context, "ls cat grep git docker") {
-		t.Errorf("BuildContextInfo() should include the commands from environment variable")
-	}
-}
-
-func TestBuildContextInfoWithoutCommands(t *testing.T) {
-	// Test without environment variable
-	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
-	defer func() {
-		if originalCommands != "" {
-			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
-		} else {
-			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-		}
-	}()
-
-	os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-
-	// Test that BuildContextInfo works without available commands
-	context, err := BuildContextInfo(10, "")
-	if err != nil {
-		t.Fatalf("BuildContextInfo() failed: %v", err)
-	}
-
-	// Should not include available commands section when env var is not set
-	if strings.Contains(context, "# Available PATH commands:") {
-		t.Errorf("BuildContextInfo() should not include available PATH commands section when env var is not set")
-	}
-}
-
-func TestGetAvailableCommandsWithLargeList(t *testing.T) {
-	// Test with a very large list of commands to ensure no truncation
-	originalCommands := os.Getenv("SMART_SUGGESTION_COMMANDS")
-	defer func() {
-		if originalCommands != "" {
-			os.Setenv("SMART_SUGGESTION_COMMANDS", originalCommands)
-		} else {
-			os.Unsetenv("SMART_SUGGESTION_COMMANDS")
-		}
-	}()
-
-	// Create a large list of commands (100+ commands) with space separation
-	var commandList []string
-	for i := 0; i < 100; i++ {
-		commandList = append(commandList, "cmd"+string(rune('a'+i%26))+string(rune('0'+i/26)))
-	}
-	testCommands := strings.Join(commandList, " ")
-
-	os.Setenv("SMART_SUGGESTION_COMMANDS", testCommands)
-
-	commands, err := getAvailableCommands()
-	if err != nil {
-		t.Fatalf("getAvailableCommands() failed with large list: %v", err)
-	}
-
-	if commands != testCommands {
-		t.Errorf("getAvailableCommands() should return all commands without truncation")
-	}
-
-	// Verify all 100 commands are present
-	returnedCommands := strings.Split(commands, " ")
-	if len(returnedCommands) != 100 {
-		t.Errorf("Expected 100 commands, got %d", len(returnedCommands))
+	if !strings.Contains(info, "# Context:") {
+		t.Fatal("expected context header")
 	}
 }

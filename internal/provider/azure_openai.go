@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/azure"
@@ -34,17 +33,11 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 		return nil, fmt.Errorf("AZURE_OPENAI_RESOURCE_NAME environment variable is not set")
 	}
 
-	apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION")
-	if apiVersion == "" {
-		apiVersion = "2024-10-21"
-	}
+	apiVersion := envOrDefault(os.Getenv("AZURE_OPENAI_API_VERSION"), "2024-10-21")
 
 	var endpoint string
 	if baseURL != "" {
-		endpoint = strings.TrimSuffix(baseURL, "/")
-		if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-			endpoint = "https://" + endpoint
-		}
+		endpoint = normalizeBaseURL(baseURL)
 	} else {
 		endpoint = fmt.Sprintf("https://%s.openai.azure.com", resourceName)
 	}
@@ -65,27 +58,9 @@ func (p *AzureOpenAIProvider) Fetch(ctx context.Context, input string, systemPro
 }
 
 func (p *AzureOpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	debug.Log("Sending Azure OpenAI request", map[string]any{
-		"deployment":    p.DeploymentName,
-		"system_prompt": systemPrompt,
-		"history":       history,
-		"input":         input,
-	})
+	logProviderRequest("azure_openai", p.DeploymentName, systemPrompt, history, input)
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(systemPrompt),
-	}
-
-	for _, msg := range history {
-		switch msg.Role {
-		case "user":
-			messages = append(messages, openai.UserMessage(msg.Content))
-		case "assistant":
-			messages = append(messages, openai.AssistantMessage(msg.Content))
-		}
-	}
-
-	messages = append(messages, openai.UserMessage(input))
+	messages := buildOpenAIChatMessages(systemPrompt, input, history)
 
 	resp, err := p.Client.Chat.Completions.New(
 		ctx,

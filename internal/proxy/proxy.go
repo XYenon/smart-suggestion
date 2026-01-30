@@ -367,16 +367,20 @@ type lineLimitedWriter struct {
 	filePath string
 	maxLines int
 	lines    []string
+	writePos int
 	buf      []byte
 	mu       sync.Mutex
 }
 
 func newLineLimitedWriter(file *os.File, filePath string, maxLines int) *lineLimitedWriter {
+	if maxLines <= 0 {
+		maxLines = 1
+	}
 	return &lineLimitedWriter{
 		file:     file,
 		filePath: filePath,
 		maxLines: maxLines,
-		lines:    make([]string, 0, maxLines),
+		lines:    make([]string, maxLines),
 	}
 }
 
@@ -403,10 +407,8 @@ func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
 
 		// Strip ANSI escape sequences before storing
 		line = stripANSI(line)
-		w.lines = append(w.lines, line)
-		if len(w.lines) > w.maxLines {
-			w.lines = w.lines[1:]
-		}
+		w.lines[w.writePos] = line
+		w.writePos = (w.writePos + 1) % w.maxLines
 	}
 
 	if err := w.flush(); err != nil {
@@ -423,7 +425,12 @@ func (w *lineLimitedWriter) flush() error {
 	if _, err := w.file.Seek(0, 0); err != nil {
 		return err
 	}
-	for _, line := range w.lines {
+	for i := 0; i < w.maxLines; i++ {
+		idx := (w.writePos + i) % w.maxLines
+		line := w.lines[idx]
+		if line == "" {
+			continue
+		}
 		if _, err := w.file.WriteString(line); err != nil {
 			return err
 		}
