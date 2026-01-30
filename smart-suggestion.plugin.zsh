@@ -286,8 +286,9 @@ function _do_smart_suggestion() {
         zle -U "$suggestion"
     elif [[ "$first_char" == '+' ]]; then
         _zsh_autosuggest_suggest "$suggestion"
-        zle -R
     fi
+
+    zle reset-prompt
 }
 
 function _check_smart_suggestion_updates() {
