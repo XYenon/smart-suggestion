@@ -228,36 +228,11 @@ func writeSuggestion(outputFile string, suggestion string) error {
 	return nil
 }
 
-func shouldRequireProviderFlags(args []string) bool {
-	if len(args) <= 1 {
-		return false
-	}
-
-	subcommand := args[1]
-	switch subcommand {
-	case "proxy", "rotate-logs", "version", "update":
-		return false
-	default:
-		return true
-	}
-}
-
-func markRequiredFlags(rootCmd *cobra.Command, rotateCmd *cobra.Command) {
-	if shouldRequireProviderFlags(os.Args) {
-		rootCmd.MarkFlagRequired("provider")
-		rootCmd.MarkFlagRequired("input")
-	}
-
-	if len(os.Args) > 1 && os.Args[1] == "rotate-logs" {
-		rotateCmd.MarkFlagRequired("log-file")
-	}
-}
-
 func buildRootCmd() *cobra.Command {
 	var rootCmd = &cobra.Command{
 		Use:   "smart-suggestion",
 		Short: "AI-powered smart suggestions for shell commands",
-		Run:   runSuggest,
+		RunE:  runSuggest,
 	}
 
 	rootCmd.Flags().StringVarP(&providerName, "provider", "p", "", "AI provider (openai, azure_openai, anthropic, gemini)")
@@ -282,10 +257,11 @@ func buildRootCmd() *cobra.Command {
 	var rotateCmd = &cobra.Command{
 		Use:   "rotate-logs",
 		Short: "Rotate log files to prevent them from growing too large",
-		Run:   runRotateLogs,
+		RunE:  runRotateLogs,
 	}
-	rotateCmd.Flags().StringVarP(&proxyLogFile, "log-file", "l", paths.GetDefaultProxyLogFile(), "Log file path to rotate (required)")
+	rotateCmd.Flags().StringVarP(&proxyLogFile, "log-file", "l", "", "Log file path to rotate (required)")
 	rotateCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
+	rotateCmd.MarkFlagRequired("log-file")
 
 	var updateCmd = &cobra.Command{
 		Use:   "update",
@@ -307,7 +283,6 @@ func buildRootCmd() *cobra.Command {
 	}
 
 	rootCmd.AddCommand(proxyCmd, rotateCmd, updateCmd, versionCmd)
-	markRequiredFlags(rootCmd, rotateCmd)
 
 	return rootCmd
 }
@@ -321,8 +296,15 @@ func main() {
 	}
 }
 
-func runSuggest(cmd *cobra.Command, args []string) {
+func runSuggest(cmd *cobra.Command, args []string) error {
 	debug.Enable(dbg)
+
+	if providerName == "" {
+		return fmt.Errorf("required flag \"provider\" not set")
+	}
+	if input == "" {
+		return fmt.Errorf("required flag \"input\" not set")
+	}
 
 	completePrompt := buildPrompt(scrollbackLines, scrollbackFile, sendContext)
 	providerClient, err := selectProviderFunc(cmd)
@@ -334,9 +316,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 			"input":    input,
 		})
 
-		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
-		exitFunc(1)
-		return
+		return fmt.Errorf("error fetching suggestions from %s API: %w", providerName, err)
 	}
 
 	suggestion, err := providerClient.FetchWithHistory(cmd.Context(), input, completePrompt, getExampleHistory())
@@ -347,9 +327,7 @@ func runSuggest(cmd *cobra.Command, args []string) {
 			"input":    input,
 		})
 
-		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
-		exitFunc(1)
-		return
+		return fmt.Errorf("error fetching suggestions from %s API: %w", providerName, err)
 	}
 
 	finalSuggestion := provider.ParseAndExtractCommand(suggestion)
@@ -362,9 +340,9 @@ func runSuggest(cmd *cobra.Command, args []string) {
 	})
 
 	if err := writeSuggestion(outputFile, finalSuggestion); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
-		exitFunc(1)
+		return err
 	}
+	return nil
 }
 
 func runProxy(cmd *cobra.Command, args []string) {
@@ -394,26 +372,19 @@ func runProxy(cmd *cobra.Command, args []string) {
 	}
 }
 
-func runRotateLogs(cmd *cobra.Command, args []string) {
+func runRotateLogs(cmd *cobra.Command, args []string) error {
 	debug.Enable(dbg)
-
-	if proxyLogFile == "" {
-		fmt.Fprintf(os.Stderr, "Error: --log-file is required\n")
-		exitFunc(1)
-		return
-	}
 
 	debug.Log("Rotating log file", map[string]any{
 		"log_file": proxyLogFile,
 	})
 
 	if err := logRotator.ForceRotate(proxyLogFile); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to rotate log file: %v\n", err)
-		exitFunc(1)
-		return
+		return fmt.Errorf("failed to rotate log file: %w", err)
 	}
 
 	fmt.Printf("Successfully rotated log file: %s\n", proxyLogFile)
+	return nil
 }
 
 func runUpdate(cmd *cobra.Command, args []string) {
