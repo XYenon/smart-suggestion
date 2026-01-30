@@ -400,6 +400,7 @@ func runRotateLogs(cmd *cobra.Command, args []string) {
 	if proxyLogFile == "" {
 		fmt.Fprintf(os.Stderr, "Error: --log-file is required\n")
 		exitFunc(1)
+		return
 	}
 
 	debug.Log("Rotating log file", map[string]any{
@@ -409,6 +410,7 @@ func runRotateLogs(cmd *cobra.Command, args []string) {
 	if err := logRotator.ForceRotate(proxyLogFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to rotate log file: %v\n", err)
 		exitFunc(1)
+		return
 	}
 
 	fmt.Printf("Successfully rotated log file: %s\n", proxyLogFile)
@@ -429,10 +431,12 @@ func runUpdate(cmd *cobra.Command, args []string) {
 		}
 		return
 	}
-	fmt.Printf("New version %s available. Installing...\n", latest)
 	if checkOnly {
+		fmt.Printf("New version %s available.\n", latest)
 		exitFunc(1)
+		return
 	}
+	fmt.Printf("New version %s available. Installing...\n", latest)
 	if err := installUpdateFunc(url); err != nil {
 		fmt.Printf("Install failed: %v\n", err)
 	} else {

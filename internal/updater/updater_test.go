@@ -367,6 +367,86 @@ func TestInstallUpdate_PluginInstallFailureRollsBackPlugin(t *testing.T) {
 	}
 }
 
+func TestInstallUpdate_PluginInstallFailureRollsBackBinary(t *testing.T) {
+	tempDir := t.TempDir()
+
+	dummyExe := filepath.Join(tempDir, "smart-suggestion")
+	oldBinary := "old binary"
+	if err := os.WriteFile(dummyExe, []byte(oldBinary), 0755); err != nil {
+		t.Fatalf("write dummy exe: %v", err)
+	}
+
+	pluginDst := filepath.Join(tempDir, "smart-suggestion.plugin.zsh")
+	oldPlugin := "old plugin"
+	if err := os.WriteFile(pluginDst, []byte(oldPlugin), 0644); err != nil {
+		t.Fatalf("write old plugin: %v", err)
+	}
+
+	oldOsExecutable := osExecutable
+	defer func() { osExecutable = oldOsExecutable }()
+	osExecutable = func() (string, error) {
+		return dummyExe, nil
+	}
+
+	oldReplace := replaceWithBackupFunc
+	t.Cleanup(func() { replaceWithBackupFunc = oldReplace })
+	replaceWithBackupFunc = func(targetPath, sourcePath string, mode os.FileMode) (func(), error) {
+		if strings.HasSuffix(targetPath, "smart-suggestion.plugin.zsh") {
+			return func() {}, fmt.Errorf("simulated plugin install error")
+		}
+		return replaceWithBackup(targetPath, sourcePath, mode)
+	}
+
+	archivePath := filepath.Join(tempDir, "update.tar.gz")
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	binContent := "new binary"
+	binHdr := &tar.Header{Name: "smart-suggestion", Mode: 0755, Size: int64(len(binContent))}
+	tw.WriteHeader(binHdr)
+	tw.Write([]byte(binContent))
+
+	pluginContent := "new plugin"
+	plHdr := &tar.Header{Name: "smart-suggestion.plugin.zsh", Mode: 0644, Size: int64(len(pluginContent))}
+	tw.WriteHeader(plHdr)
+	tw.Write([]byte(pluginContent))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, _ := os.ReadFile(archivePath)
+		w.Write(data)
+	}))
+	defer ts.Close()
+
+	err := InstallUpdate(ts.URL)
+	if err == nil {
+		t.Fatalf("expected error for plugin install failure, got nil")
+	}
+
+	gotBin, readErr := os.ReadFile(dummyExe)
+	if readErr != nil {
+		t.Fatalf("read binary after failure: %v", readErr)
+	}
+	if string(gotBin) != oldBinary {
+		t.Fatalf("expected binary rollback content %q, got %q", oldBinary, string(gotBin))
+	}
+	if _, statErr := os.Stat(dummyExe + ".backup"); !os.IsNotExist(statErr) {
+		t.Fatalf("expected binary backup to be absent after rollback, stat error: %v", statErr)
+	}
+
+	gotPlugin, readErr := os.ReadFile(pluginDst)
+	if readErr != nil {
+		t.Fatalf("read plugin after failure: %v", readErr)
+	}
+	if string(gotPlugin) != oldPlugin {
+		t.Fatalf("expected plugin to remain unchanged %q, got %q", oldPlugin, string(gotPlugin))
+	}
+}
+
 func TestExtractTarGz_Error(t *testing.T) {
 	err := extractTarGz("/non/existent/src", "/tmp/dest")
 	if err == nil {
