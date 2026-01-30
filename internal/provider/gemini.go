@@ -32,10 +32,7 @@ func NewGeminiProvider(ctx context.Context) (*GeminiProvider, error) {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	model := os.Getenv("GEMINI_MODEL")
-	if model == "" {
-		model = "gemini-2.5-flash"
-	}
+	model := envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-2.5-flash")
 
 	return &GeminiProvider{
 		Model:  model,
@@ -48,12 +45,7 @@ func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt s
 }
 
 func (p *GeminiProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	debug.Log("Sending Gemini request", map[string]any{
-		"model":         p.Model,
-		"system_prompt": systemPrompt,
-		"history":       history,
-		"input":         input,
-	})
+	logProviderRequest("gemini", p.Model, systemPrompt, history, input)
 
 	config := &genai.GenerateContentConfig{SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser)}
 

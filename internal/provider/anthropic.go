@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -26,19 +25,11 @@ func NewAnthropicProvider() (*AnthropicProvider, error) {
 		option.WithAPIKey(apiKey),
 	}
 
-	baseURL := os.Getenv("ANTHROPIC_BASE_URL")
-	if baseURL != "" {
-		baseURL = strings.TrimSuffix(baseURL, "/")
-		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-			baseURL = "https://" + baseURL
-		}
+	if baseURL := normalizeBaseURL(os.Getenv("ANTHROPIC_BASE_URL")); baseURL != "" {
 		options = append(options, option.WithBaseURL(baseURL))
 	}
 
-	model := os.Getenv("ANTHROPIC_MODEL")
-	if model == "" {
-		model = "claude-3-5-sonnet-20241022"
-	}
+	model := envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-3-5-sonnet-20241022")
 
 	client := anthropic.NewClient(options...)
 
@@ -53,12 +44,7 @@ func (p *AnthropicProvider) Fetch(ctx context.Context, input string, systemPromp
 }
 
 func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	debug.Log("Sending Anthropic request", map[string]any{
-		"model":         p.Model,
-		"system_prompt": systemPrompt,
-		"history":       history,
-		"input":         input,
-	})
+	logProviderRequest("anthropic", p.Model, systemPrompt, history, input)
 
 	messages := []anthropic.MessageParam{}
 	for _, msg := range history {

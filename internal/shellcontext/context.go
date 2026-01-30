@@ -21,8 +21,24 @@ var (
 )
 
 func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error) {
-	var parts []string
+	if scrollbackLines < 0 {
+		scrollbackLines = 0
+	}
 
+	var builder strings.Builder
+	builder.WriteString(buildContextHeader())
+
+	appendContextSection(&builder, "This is the alias defined in your shell", getAliases)
+	appendContextSection(&builder, "Available PATH commands", getAvailableCommands)
+	appendContextSection(&builder, "Shell history", getHistory)
+	appendContextSection(&builder, "Scrollback", func() (string, error) {
+		return getScrollback(scrollbackLines, scrollbackFile)
+	})
+
+	return builder.String(), nil
+}
+
+func buildContextHeader() string {
 	currentUser := os.Getenv("USER")
 	if currentUser == "" {
 		currentUser = "unknown"
@@ -47,34 +63,24 @@ func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error
 	userID := getUserID()
 	unameInfo := getUnameInfo()
 
-	parts = append(parts, fmt.Sprintf("# Context:\n\nYou are user %s with id %s in directory %s. Your shell is %s and your terminal is %s running on %s. %s",
-		currentUser, userID, currentDir, shell, term, unameInfo, sysInfo))
+	return fmt.Sprintf("# Context:\n\nYou are user %s with id %s in directory %s. Your shell is %s and your terminal is %s running on %s. %s",
+		currentUser, userID, currentDir, shell, term, unameInfo, sysInfo)
+}
 
-	if aliases, err := getAliases(); err == nil && aliases != "" {
-		parts = append(parts, "\n\n# This is the alias defined in your shell:\n\n", aliases)
-	} else if err != nil {
-		debug.Log("Failed to get aliases", map[string]any{"error": err.Error()})
+func appendContextSection(builder *strings.Builder, title string, getter func() (string, error)) {
+	value, err := getter()
+	if err != nil {
+		debug.Log("Failed to get context section", map[string]any{
+			"section": title,
+			"error":   err.Error(),
+		})
+		return
 	}
-
-	if commands, err := getAvailableCommands(); err == nil && commands != "" {
-		parts = append(parts, "\n\n# Available PATH commands:\n\n", commands)
-	} else if err != nil {
-		debug.Log("Failed to get available commands", map[string]any{"error": err.Error()})
+	if value == "" {
+		return
 	}
-
-	if history, err := getHistory(); err == nil && history != "" {
-		parts = append(parts, "\n\n# Shell history:\n\n", history)
-	} else if err != nil {
-		debug.Log("Failed to get history", map[string]any{"error": err.Error()})
-	}
-
-	if scrollback, err := getScrollback(scrollbackLines, scrollbackFile); err == nil && scrollback != "" {
-		parts = append(parts, "\n\n# Scrollback:\n\n", scrollback)
-	} else if err != nil {
-		debug.Log("Failed to get scrollback", map[string]any{"error": err.Error()})
-	}
-
-	return strings.Join(parts, ""), nil
+	builder.WriteString(fmt.Sprintf("\n\n# %s:\n\n", title))
+	builder.WriteString(value)
 }
 
 func getSystemInfo() string {
@@ -243,6 +249,14 @@ func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error)
 }
 
 func readLatestLines(content string, maxLines int) (string, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return "", nil
+	}
+	if maxLines <= 0 {
+		return content, nil
+	}
+
 	lines := strings.Split(content, "\n")
 	if len(lines) > maxLines {
 		lines = lines[len(lines)-maxLines:]
@@ -260,10 +274,16 @@ func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 	scanner := bufio.NewScanner(file)
 	var lines []string
 
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-		if len(lines) > maxLines {
-			lines = lines[1:]
+	if maxLines <= 0 {
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+		}
+	} else {
+		for scanner.Scan() {
+			lines = append(lines, scanner.Text())
+			if len(lines) > maxLines {
+				lines = lines[1:]
+			}
 		}
 	}
 

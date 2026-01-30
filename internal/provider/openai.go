@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -26,19 +25,11 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 		option.WithAPIKey(apiKey),
 	}
 
-	baseURL := os.Getenv("OPENAI_BASE_URL")
-	if baseURL != "" {
-		baseURL = strings.TrimSuffix(baseURL, "/")
-		if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-			baseURL = "https://" + baseURL
-		}
+	if baseURL := normalizeBaseURL(os.Getenv("OPENAI_BASE_URL")); baseURL != "" {
 		options = append(options, option.WithBaseURL(baseURL))
 	}
 
-	model := os.Getenv("OPENAI_MODEL")
-	if model == "" {
-		model = "gpt-4o-mini"
-	}
+	model := envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-4o-mini")
 
 	client := openai.NewClient(options...)
 
@@ -53,27 +44,9 @@ func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt s
 }
 
 func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	debug.Log("Sending OpenAI request", map[string]any{
-		"model":         p.Model,
-		"system_prompt": systemPrompt,
-		"history":       history,
-		"input":         input,
-	})
+	logProviderRequest("openai", p.Model, systemPrompt, history, input)
 
-	messages := []openai.ChatCompletionMessageParamUnion{
-		openai.SystemMessage(systemPrompt),
-	}
-
-	for _, msg := range history {
-		switch msg.Role {
-		case "user":
-			messages = append(messages, openai.UserMessage(msg.Content))
-		case "assistant":
-			messages = append(messages, openai.AssistantMessage(msg.Content))
-		}
-	}
-
-	messages = append(messages, openai.UserMessage(input))
+	messages := buildOpenAIChatMessages(systemPrompt, input, history)
 
 	resp, err := p.Client.Chat.Completions.New(
 		ctx,

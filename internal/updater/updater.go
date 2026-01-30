@@ -111,104 +111,56 @@ func InstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to locate extracted plugin")
 	}
 
-	binaryBackup := currentBinary + ".backup"
-	pluginBackup := pluginInstallPath + ".backup"
-	binaryBackedUp := false
-	pluginBackedUp := false
-
-	defer func() {
-		if binaryBackedUp {
-			_ = os.Remove(binaryBackup)
-		}
-		if pluginBackedUp {
-			_ = os.Remove(pluginBackup)
-		}
-	}()
-
-	if _, err := os.Stat(currentBinary); err == nil {
-		if err := os.Rename(currentBinary, binaryBackup); err != nil {
-			return fmt.Errorf("failed to backup binary: %w", err)
-		}
-		binaryBackedUp = true
-	}
-
-	if err := copyFile(newBinary, currentBinary); err != nil {
-		if binaryBackedUp {
-			_ = os.Rename(binaryBackup, currentBinary)
-			binaryBackedUp = false
-		}
+	cleanupBinaryBackup, err := replaceWithBackup(currentBinary, newBinary, 0755)
+	if err != nil {
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
+	defer cleanupBinaryBackup()
 
-	if err := os.Chmod(currentBinary, 0755); err != nil {
-		if binaryBackedUp {
-			_ = os.Remove(currentBinary)
-			_ = os.Rename(binaryBackup, currentBinary)
-			binaryBackedUp = false
-		}
-		return fmt.Errorf("failed to set binary permissions: %w", err)
-	}
-
-	if _, err := os.Stat(pluginInstallPath); err == nil {
-		if err := os.Rename(pluginInstallPath, pluginBackup); err != nil {
-			if binaryBackedUp {
-				_ = os.Remove(currentBinary)
-				_ = os.Rename(binaryBackup, currentBinary)
-				binaryBackedUp = false
-			}
-			return fmt.Errorf("failed to backup plugin: %w", err)
-		}
-		pluginBackedUp = true
-	}
-
-	if err := copyFile(newPluginPath, pluginInstallPath); err != nil {
-		if pluginBackedUp {
-			_ = os.Rename(pluginBackup, pluginInstallPath)
-			pluginBackedUp = false
-		}
-		if binaryBackedUp {
-			_ = os.Remove(currentBinary)
-			_ = os.Rename(binaryBackup, currentBinary)
-			binaryBackedUp = false
-		}
+	cleanupPluginBackup, err := replaceWithBackup(pluginInstallPath, newPluginPath, 0644)
+	if err != nil {
 		return fmt.Errorf("failed to install plugin: %w", err)
 	}
-
-	if err := os.Chmod(pluginInstallPath, 0644); err != nil {
-		if pluginBackedUp {
-			_ = os.Remove(pluginInstallPath)
-			_ = os.Rename(pluginBackup, pluginInstallPath)
-			pluginBackedUp = false
-		}
-		if binaryBackedUp {
-			_ = os.Remove(currentBinary)
-			_ = os.Rename(binaryBackup, currentBinary)
-			binaryBackedUp = false
-		}
-		return fmt.Errorf("failed to set plugin permissions: %w", err)
-	}
+	defer cleanupPluginBackup()
 
 	return nil
 }
 
-func replaceWithBackup(targetPath, sourcePath string, mode os.FileMode) error {
+func replaceWithBackup(targetPath, sourcePath string, mode os.FileMode) (func(), error) {
 	backupPath := targetPath + ".backup"
-	if err := os.Rename(targetPath, backupPath); err != nil {
-		return err
+	backupCreated := false
+
+	if _, err := os.Stat(targetPath); err == nil {
+		if err := os.Rename(targetPath, backupPath); err != nil {
+			return func() {}, err
+		}
+		backupCreated = true
+	} else if !os.IsNotExist(err) {
+		return func() {}, err
+	}
+
+	cleanup := func() {
+		if backupCreated {
+			_ = os.Remove(backupPath)
+		}
 	}
 
 	if err := copyFile(sourcePath, targetPath); err != nil {
-		_ = os.Rename(backupPath, targetPath)
-		return err
+		if backupCreated {
+			_ = os.Rename(backupPath, targetPath)
+		}
+		return func() {}, err
 	}
 
 	if err := os.Chmod(targetPath, mode); err != nil {
-		_ = os.Rename(backupPath, targetPath)
-		return err
+		_ = os.Remove(targetPath)
+		if backupCreated {
+			_ = os.Rename(backupPath, targetPath)
+		}
+		return func() {}, err
 	}
 
-	_ = os.Remove(backupPath)
-	return nil
+	return cleanup, nil
 }
 
 func findExtractedAsset(extractDir, filename string) (string, bool) {

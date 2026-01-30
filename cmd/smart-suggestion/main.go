@@ -157,6 +157,13 @@ var (
 	logRotator *pkg.LogRotator
 )
 
+var exitFunc = os.Exit
+var buildContextInfoFunc = shellcontext.BuildContextInfo
+var runProxyFunc = proxy.RunProxy
+var checkUpdateFunc = updater.CheckUpdate
+var installUpdateFunc = updater.InstallUpdate
+var selectProviderFunc = selectProvider
+
 func init() {
 	config := pkg.DefaultLogRotateConfig()
 	config.MaxSize = 5 * 1024 * 1024 // 5MB
@@ -167,7 +174,86 @@ func init() {
 	logRotator = pkg.NewLogRotator(config)
 }
 
-func main() {
+func resolveSystemPrompt() string {
+	if systemPrompt == "" {
+		return defaultSystemPrompt
+	}
+	return systemPrompt
+}
+
+func buildPrompt(scrollbackLines int, scrollbackFile string, sendContext bool) string {
+	basePrompt := resolveSystemPrompt()
+	if !sendContext {
+		return basePrompt
+	}
+
+	contextInfo, err := buildContextInfoFunc(scrollbackLines, scrollbackFile)
+	if err != nil {
+		debug.Log("Failed to build context info", map[string]any{
+			"error": err.Error(),
+		})
+		return basePrompt
+	}
+
+	return basePrompt + "\n\n" + contextInfo
+}
+
+func selectProvider(ctx *cobra.Command) (provider.Provider, error) {
+	switch strings.ToLower(providerName) {
+	case "openai":
+		return provider.NewOpenAIProvider()
+	case "azure_openai":
+		return provider.NewAzureOpenAIProvider()
+	case "anthropic":
+		return provider.NewAnthropicProvider()
+	case "gemini":
+		return provider.NewGeminiProvider(ctx.Context())
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s (valid: openai, azure_openai, anthropic, gemini)", providerName)
+	}
+}
+
+func writeSuggestion(outputFile string, suggestion string) error {
+	if outputFile == "-" || outputFile == "/dev/stdout" {
+		_, err := fmt.Fprint(os.Stdout, suggestion)
+		if err != nil {
+			return fmt.Errorf("failed to write suggestion to stdout: %w", err)
+		}
+		return nil
+	}
+
+	if err := os.WriteFile(outputFile, []byte(suggestion), 0644); err != nil {
+		return fmt.Errorf("failed to write suggestion to file: %w", err)
+	}
+	return nil
+}
+
+func shouldRequireProviderFlags(args []string) bool {
+	if len(args) <= 1 {
+		return false
+	}
+
+	subcommand := args[1]
+	switch subcommand {
+	case "proxy", "rotate-logs", "version", "update":
+		return false
+	default:
+		return true
+	}
+}
+
+func markRequiredFlags(rootCmd *cobra.Command, rotateCmd *cobra.Command) {
+	if shouldRequireProviderFlags(os.Args) {
+		rootCmd.MarkFlagRequired("provider")
+		rootCmd.MarkFlagRequired("input")
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "rotate-logs" {
+		rotateCmd.MarkFlagRequired("log-file")
+	}
+}
+
+func buildRootCmd() *cobra.Command {
 	var rootCmd = &cobra.Command{
 		Use:   "smart-suggestion",
 		Short: "AI-powered smart suggestions for shell commands",
@@ -221,56 +307,25 @@ func main() {
 	}
 
 	rootCmd.AddCommand(proxyCmd, rotateCmd, updateCmd, versionCmd)
+	markRequiredFlags(rootCmd, rotateCmd)
 
-	if len(os.Args) > 1 && os.Args[1] != "proxy" && os.Args[1] != "rotate-logs" && os.Args[1] != "version" && os.Args[1] != "update" {
-		rootCmd.MarkFlagRequired("provider")
-		rootCmd.MarkFlagRequired("input")
-	}
+	return rootCmd
+}
 
-	if len(os.Args) > 1 && os.Args[1] == "rotate-logs" {
-		rotateCmd.MarkFlagRequired("log-file")
-	}
+func main() {
+	rootCmd := buildRootCmd()
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 }
 
 func runSuggest(cmd *cobra.Command, args []string) {
 	debug.Enable(dbg)
 
-	if systemPrompt == "" {
-		systemPrompt = defaultSystemPrompt
-	}
-
-	completePrompt := systemPrompt
-	if sendContext {
-		contextInfo, err := shellcontext.BuildContextInfo(scrollbackLines, scrollbackFile)
-		if err != nil {
-			debug.Log("Failed to build context info", map[string]any{
-				"error": err.Error(),
-			})
-		} else {
-			completePrompt = systemPrompt + "\n\n" + contextInfo
-		}
-	}
-
-	var p provider.Provider
-	var err error
-
-	switch strings.ToLower(providerName) {
-	case "openai":
-		p, err = provider.NewOpenAIProvider()
-	case "azure_openai":
-		p, err = provider.NewAzureOpenAIProvider()
-	case "anthropic":
-		p, err = provider.NewAnthropicProvider()
-	case "gemini":
-		p, err = provider.NewGeminiProvider(cmd.Context())
-	default:
-		err = fmt.Errorf("unsupported provider: %s (valid: openai, azure_openai, anthropic, gemini)", providerName)
-	}
+	completePrompt := buildPrompt(scrollbackLines, scrollbackFile, sendContext)
+	providerClient, err := selectProviderFunc(cmd)
 
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
@@ -280,10 +335,11 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		})
 
 		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 
-	suggestion, err := p.FetchWithHistory(cmd.Context(), input, completePrompt, getExampleHistory())
+	suggestion, err := providerClient.FetchWithHistory(cmd.Context(), input, completePrompt, getExampleHistory())
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
 			"error":    err.Error(),
@@ -292,7 +348,8 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		})
 
 		fmt.Fprintf(os.Stderr, "Error fetching suggestions from %s API: %v\n", providerName, err)
-		os.Exit(1)
+		exitFunc(1)
+		return
 	}
 
 	finalSuggestion := provider.ParseAndExtractCommand(suggestion)
@@ -304,16 +361,9 @@ func runSuggest(cmd *cobra.Command, args []string) {
 		"parsed_suggestion": finalSuggestion,
 	})
 
-	if outputFile == "-" || outputFile == "/dev/stdout" {
-		if _, err := fmt.Fprint(os.Stdout, finalSuggestion); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write suggestion to stdout: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		if err := os.WriteFile(outputFile, []byte(finalSuggestion), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write suggestion to file: %v\n", err)
-			os.Exit(1)
-		}
+	if err := writeSuggestion(outputFile, finalSuggestion); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		exitFunc(1)
 	}
 }
 
@@ -334,7 +384,7 @@ func runProxy(cmd *cobra.Command, args []string) {
 		logFile = paths.GetDefaultProxyLogFile()
 	}
 
-	err := proxy.RunProxy(shell, proxy.ProxyOptions{
+	err := runProxyFunc(shell, proxy.ProxyOptions{
 		LogFile:         logFile,
 		SessionID:       sessID,
 		ScrollbackLines: scrollbackLines,
@@ -349,7 +399,7 @@ func runRotateLogs(cmd *cobra.Command, args []string) {
 
 	if proxyLogFile == "" {
 		fmt.Fprintf(os.Stderr, "Error: --log-file is required\n")
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	debug.Log("Rotating log file", map[string]any{
@@ -358,7 +408,7 @@ func runRotateLogs(cmd *cobra.Command, args []string) {
 
 	if err := logRotator.ForceRotate(proxyLogFile); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to rotate log file: %v\n", err)
-		os.Exit(1)
+		exitFunc(1)
 	}
 
 	fmt.Printf("Successfully rotated log file: %s\n", proxyLogFile)
@@ -367,7 +417,7 @@ func runRotateLogs(cmd *cobra.Command, args []string) {
 func runUpdate(cmd *cobra.Command, args []string) {
 	checkOnly, _ := cmd.Flags().GetBool("check-only")
 	fmt.Println("Checking for updates...")
-	latest, url, err := updater.CheckUpdate(Version)
+	latest, url, err := checkUpdateFunc(Version)
 	if err != nil {
 		fmt.Printf("Check failed: %v\n", err)
 		return
@@ -375,15 +425,15 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	if url == "" {
 		fmt.Println("Smart Suggestion is already up to date!")
 		if checkOnly {
-			os.Exit(0)
+			exitFunc(0)
 		}
 		return
 	}
 	fmt.Printf("New version %s available. Installing...\n", latest)
 	if checkOnly {
-		os.Exit(1)
+		exitFunc(1)
 	}
-	if err := updater.InstallUpdate(url); err != nil {
+	if err := installUpdateFunc(url); err != nil {
 		fmt.Printf("Install failed: %v\n", err)
 	} else {
 		fmt.Println("Successfully updated!")

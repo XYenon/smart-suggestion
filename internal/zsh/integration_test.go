@@ -25,10 +25,10 @@ type zshSession struct {
 
 func (s *zshSession) Close() error {
 	if s.cmd != nil && s.cmd.Process != nil {
-		s.cmd.Process.Kill()
+		_ = s.cmd.Process.Kill()
 	}
 	close(s.done)
-	os.RemoveAll(s.tmpDir)
+	_ = os.RemoveAll(s.tmpDir)
 	return s.pty.Close()
 }
 
@@ -77,20 +77,20 @@ func (s *zshSession) RunCommand(cmd string, timeout time.Duration) (string, erro
 	s.mu.Lock()
 	s.output.Reset()
 	s.mu.Unlock()
-	s.pty.Write([]byte(cmd + "\r\n"))
+	_, _ = s.pty.Write([]byte(cmd + "\r\n"))
 	// Wait for the command to be echoed and then for the prompt
 	return s.Expect("READY_FOR_COMMAND", timeout)
 }
 
 func (s *zshSession) SetMockResponse(response string) error {
-	os.Remove(filepath.Join(s.tmpDir, "mock_error"))
-	os.Remove(filepath.Join(s.tmpDir, "mock_delay"))
+	_ = os.Remove(filepath.Join(s.tmpDir, "mock_error"))
+	_ = os.Remove(filepath.Join(s.tmpDir, "mock_delay"))
 	return os.WriteFile(filepath.Join(s.tmpDir, "mock_response"), []byte(response), 0644)
 }
 
 func (s *zshSession) SetMockError(err string) error {
-	os.Remove(filepath.Join(s.tmpDir, "mock_response"))
-	os.Remove(filepath.Join(s.tmpDir, "mock_delay"))
+	_ = os.Remove(filepath.Join(s.tmpDir, "mock_response"))
+	_ = os.Remove(filepath.Join(s.tmpDir, "mock_delay"))
 	return os.WriteFile(filepath.Join(s.tmpDir, "mock_error"), []byte(err), 0644)
 }
 
@@ -172,7 +172,7 @@ exit 0
 
 	// Setup config.zsh
 	configDir := filepath.Join(tmpDir, "smart-suggestion")
-	os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(configDir, 0755)
 	configContent := fmt.Sprintf(`
 OPENAI_API_KEY="fake-key"
 ANTHROPIC_API_KEY="fake-key"
@@ -182,7 +182,7 @@ SMART_SUGGESTION_AUTO_UPDATE="false"
 SMART_SUGGESTION_PROXY_MODE="false"
 SMART_SUGGESTION_DEBUG="true"
 `, provider, mockBinPath)
-	os.WriteFile(filepath.Join(configDir, "config.zsh"), []byte(configContent), 0644)
+	_ = os.WriteFile(filepath.Join(configDir, "config.zsh"), []byte(configContent), 0644)
 
 	cmd := exec.Command("zsh", "-f", "-i")
 	cmd.Dir = projectRoot
@@ -215,18 +215,18 @@ SMART_SUGGESTION_DEBUG="true"
 
 	time.Sleep(200 * time.Millisecond)
 
-	session.pty.Write([]byte("export PS1='READY_FOR_COMMAND'\r\n"))
+	_, _ = session.pty.Write([]byte("export PS1='READY_FOR_COMMAND'\r\n"))
 	// Wait for the command to be echoed AND for the prompt to appear
 	// We can use a trick: export the prompt then echo a unique marker
-	session.pty.Write([]byte("echo PROMPT_SET\r\n"))
+	_, _ = session.pty.Write([]byte("echo PROMPT_SET\r\n"))
 	_, err = session.Expect("PROMPT_SET", 10*time.Second)
 	if err != nil {
 		session.Close()
 		return nil, fmt.Errorf("failed to set prompt: %v. Output: %s", err, session.output.String())
 	}
 
-	session.pty.Write([]byte(fmt.Sprintf("source %s/zsh-autosuggestions.zsh\r\n", autosuggestDir)))
-	session.pty.Write([]byte("echo AUTOSUGGEST_SOURCED\r\n"))
+	_, _ = session.pty.Write([]byte(fmt.Sprintf("source %s/zsh-autosuggestions.zsh\r\n", autosuggestDir)))
+	_, _ = session.pty.Write([]byte("echo AUTOSUGGEST_SOURCED\r\n"))
 	_, err = session.Expect("AUTOSUGGEST_SOURCED", 10*time.Second)
 	if err != nil {
 		session.Close()
@@ -234,8 +234,8 @@ SMART_SUGGESTION_DEBUG="true"
 	}
 
 	session.output.Reset()
-	session.pty.Write([]byte(fmt.Sprintf("source %s\r\n", pluginPath)))
-	session.pty.Write([]byte("echo PLUGIN_SOURCED\r\n"))
+	_, _ = session.pty.Write([]byte(fmt.Sprintf("source %s\r\n", pluginPath)))
+	_, _ = session.pty.Write([]byte("echo PLUGIN_SOURCED\r\n"))
 	_, err = session.Expect("PLUGIN_SOURCED", 10*time.Second)
 	if err != nil {
 		session.Close()
@@ -247,7 +247,7 @@ SMART_SUGGESTION_DEBUG="true"
 
 func (s *zshSession) TriggerSuggest() {
 	// Send ^O (Ctrl-O) which is bound to _do_smart_suggestion
-	s.pty.Write([]byte{0x0f})
+	_, _ = s.pty.Write([]byte{0x0f})
 }
 
 func TestAppendSuggestion(t *testing.T) {

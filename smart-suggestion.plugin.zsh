@@ -99,32 +99,60 @@ function _extract_ghostty_scrollback_file() {
     fi
 }
 
-function _fetch_suggestions() {
-    local scrollback_file="$1"
-
-    # Source config file and export all variables
+# Load config file and export variables for child processes.
+function _smart_suggestion_source_config() {
     if [[ -f "${SMART_SUGGESTION_CONFIG}" ]]; then
         set -a
         source "${SMART_SUGGESTION_CONFIG}"
         set +a
     fi
+}
+
+# Emit debug flag when debug logging is enabled.
+function _smart_suggestion_debug_flag() {
+    if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
+        echo "--debug"
+    fi
+}
+
+# Emit context flag when context sharing is enabled.
+function _smart_suggestion_context_flag() {
+    if [[ "$SMART_SUGGESTION_SEND_CONTEXT" == 'true' ]]; then
+        echo "--context"
+    fi
+}
+
+# Capture shell aliases for context.
+function _smart_suggestion_shell_aliases() {
+    alias 2>/dev/null
+}
+
+# Capture available commands for context.
+function _smart_suggestion_available_commands() {
+    print -r -- "${(k)commands}"
+}
+
+# Capture recent shell history for context.
+function _smart_suggestion_shell_history() {
+    fc -ln -$SMART_SUGGESTION_HISTORY_LINES 2>/dev/null
+}
+
+function _fetch_suggestions() {
+    local scrollback_file="$1"
+
+    # Source config file and export all variables
+    _smart_suggestion_source_config
 
     # Prepare debug flag
-    local debug_flag=""
-    if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-        debug_flag="--debug"
-    fi
+    local debug_flag="$(_smart_suggestion_debug_flag)"
 
     # Prepare context flag
-    local context_flag=""
-    if [[ "$SMART_SUGGESTION_SEND_CONTEXT" == 'true' ]]; then
-        context_flag="--context"
-    fi
+    local context_flag="$(_smart_suggestion_context_flag)"
 
     # Capture shell context to avoid spawning interactive shells in Go binary
-    local shell_aliases=$(alias 2>/dev/null)
-    local available_commands="${(k)commands}"
-    local shell_history=$(fc -ln -$SMART_SUGGESTION_HISTORY_LINES 2>/dev/null)
+    local shell_aliases=$(_smart_suggestion_shell_aliases)
+    local available_commands=$(_smart_suggestion_available_commands)
+    local shell_history=$(_smart_suggestion_shell_history)
 
     # Prepare scrollback file args (use array for proper argument handling)
     local scrollback_file_args=()
