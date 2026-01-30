@@ -50,15 +50,33 @@ func TestBuildPromptWithScrollback(t *testing.T) {
 	}
 }
 
-func TestShouldRequireProviderFlags(t *testing.T) {
-	if shouldRequireProviderFlags([]string{"smart-suggestion"}) {
-		t.Fatal("expected no requirements for root usage")
+func TestRunSuggestMissingFlags(t *testing.T) {
+	oldProvider := providerName
+	oldInput := input
+	oldDebug := dbg
+	t.Cleanup(func() {
+		providerName = oldProvider
+		input = oldInput
+		dbg = oldDebug
+	})
+
+	providerName = ""
+	input = ""
+	dbg = false
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	err := runSuggest(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for missing provider flag")
 	}
-	if shouldRequireProviderFlags([]string{"smart-suggestion", "proxy"}) {
-		t.Fatal("expected no requirements for proxy")
-	}
-	if !shouldRequireProviderFlags([]string{"smart-suggestion", "suggest"}) {
-		t.Fatal("expected requirements for suggest")
+
+	providerName = "openai"
+	input = ""
+	err = runSuggest(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for missing input flag")
 	}
 }
 
@@ -157,19 +175,18 @@ func TestRunRotateLogs(t *testing.T) {
 		t.Fatalf("failed to write log: %v", err)
 	}
 
-	oldExit := exitFunc
 	oldLogFile := proxyLogFile
 	oldDebug := dbg
 	t.Cleanup(func() {
-		exitFunc = oldExit
 		proxyLogFile = oldLogFile
 		dbg = oldDebug
 	})
 
-	exitFunc = func(code int) {}
 	proxyLogFile = file
 	dbg = false
-	runRotateLogs(nil, nil)
+	if err := runRotateLogs(nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestRunRotateLogsMissingFile(t *testing.T) {
@@ -181,25 +198,19 @@ func TestRunRotateLogsMissingFile(t *testing.T) {
 		t.Fatalf("failed to remove log: %v", err)
 	}
 
-	oldExit := exitFunc
 	oldLogFile := proxyLogFile
 	oldDebug := dbg
 	t.Cleanup(func() {
-		exitFunc = oldExit
 		proxyLogFile = oldLogFile
 		dbg = oldDebug
 	})
 
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
 	proxyLogFile = file
 	dbg = false
 
-	runRotateLogs(nil, nil)
-	if exitCode != -1 {
-		t.Fatalf("expected no exit for missing file, got %d", exitCode)
+	err := runRotateLogs(nil, nil)
+	if err != nil {
+		t.Fatalf("expected no error for missing file, got %v", err)
 	}
 }
 
@@ -326,16 +337,6 @@ func TestWriteSuggestionDevStdout(t *testing.T) {
 	if string(data) != "test" {
 		t.Fatalf("expected 'test', got %q", string(data))
 	}
-}
-
-func TestMarkRequiredFlags(t *testing.T) {
-	rootCmd := &cobra.Command{}
-	rootCmd.Flags().String("provider", "", "")
-	rootCmd.Flags().String("input", "", "")
-	rotateCmd := &cobra.Command{}
-	rotateCmd.Flags().String("log-file", "", "")
-
-	markRequiredFlags(rootCmd, rotateCmd)
 }
 
 func TestRunProxy(t *testing.T) {
@@ -481,29 +482,6 @@ func TestRunUpdateInstallSuccess(t *testing.T) {
 	}
 }
 
-func TestRunRotateLogsEmptyFile(t *testing.T) {
-	oldExit := exitFunc
-	oldLogFile := proxyLogFile
-	oldDebug := dbg
-	t.Cleanup(func() {
-		exitFunc = oldExit
-		proxyLogFile = oldLogFile
-		dbg = oldDebug
-	})
-
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
-	proxyLogFile = ""
-	dbg = false
-
-	runRotateLogs(nil, nil)
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1 for empty log file, got %d", exitCode)
-	}
-}
-
 func TestRunRotateLogsForceRotateError(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "readonly.log")
@@ -515,39 +493,19 @@ func TestRunRotateLogsForceRotateError(t *testing.T) {
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0755) })
 
-	oldExit := exitFunc
 	oldLogFile := proxyLogFile
 	oldDebug := dbg
-	oldStdout := os.Stdout
 	t.Cleanup(func() {
-		exitFunc = oldExit
 		proxyLogFile = oldLogFile
 		dbg = oldDebug
-		os.Stdout = oldStdout
 	})
 
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
 	proxyLogFile = file
 	dbg = false
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe: %v", err)
-	}
-	os.Stdout = w
-
-	runRotateLogs(nil, nil)
-	_ = w.Close()
-	out, _ := io.ReadAll(r)
-
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1 for rotate error, got %d", exitCode)
-	}
-	if bytes.Contains(out, []byte("Successfully rotated")) {
-		t.Fatalf("expected no success output on failure, got %q", string(out))
+	err := runRotateLogs(nil, nil)
+	if err == nil {
+		t.Fatal("expected error for rotate failure")
 	}
 }
 
@@ -556,20 +514,6 @@ func TestWriteSuggestionWriteError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for write to nonexistent directory")
 	}
-}
-
-func TestMarkRequiredFlagsRotateLogs(t *testing.T) {
-	oldArgs := os.Args
-	t.Cleanup(func() { os.Args = oldArgs })
-
-	os.Args = []string{"smart-suggestion", "rotate-logs"}
-	rootCmd := &cobra.Command{}
-	rootCmd.Flags().String("provider", "", "")
-	rootCmd.Flags().String("input", "", "")
-	rotateCmd := &cobra.Command{}
-	rotateCmd.Flags().String("log-file", "", "")
-
-	markRequiredFlags(rootCmd, rotateCmd)
 }
 
 func TestBuildRootCmd(t *testing.T) {
@@ -611,25 +555,6 @@ func TestBuildRootCmdVersionSubcommand(t *testing.T) {
 	versionCmd.Run(versionCmd, nil)
 }
 
-func TestShouldRequireProviderFlagsSubcommands(t *testing.T) {
-	cases := []struct {
-		args     []string
-		expected bool
-	}{
-		{[]string{"smart-suggestion", "rotate-logs"}, false},
-		{[]string{"smart-suggestion", "version"}, false},
-		{[]string{"smart-suggestion", "update"}, false},
-		{[]string{"smart-suggestion", "other"}, true},
-	}
-
-	for _, tc := range cases {
-		got := shouldRequireProviderFlags(tc.args)
-		if got != tc.expected {
-			t.Fatalf("for %v: expected %v, got %v", tc.args, tc.expected, got)
-		}
-	}
-}
-
 type mockProvider struct {
 	response string
 	err      error
@@ -645,7 +570,6 @@ func (m *mockProvider) FetchWithHistory(ctx context.Context, input, systemPrompt
 
 func TestRunSuggestSuccess(t *testing.T) {
 	oldSelect := selectProviderFunc
-	oldExit := exitFunc
 	oldOutput := outputFile
 	oldInput := input
 	oldProvider := providerName
@@ -653,7 +577,6 @@ func TestRunSuggestSuccess(t *testing.T) {
 	oldContext := sendContext
 	t.Cleanup(func() {
 		selectProviderFunc = oldSelect
-		exitFunc = oldExit
 		outputFile = oldOutput
 		input = oldInput
 		providerName = oldProvider
@@ -664,7 +587,6 @@ func TestRunSuggestSuccess(t *testing.T) {
 	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
 		return &mockProvider{response: "=ls -la", err: nil}, nil
 	}
-	exitFunc = func(code int) {}
 	outputFile = filepath.Join(t.TempDir(), "output.txt")
 	input = "list files"
 	providerName = "mock"
@@ -674,7 +596,9 @@ func TestRunSuggestSuccess(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	runSuggest(cmd, nil)
+	if err := runSuggest(cmd, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	content, err := os.ReadFile(outputFile)
 	if err != nil {
@@ -687,45 +611,42 @@ func TestRunSuggestSuccess(t *testing.T) {
 
 func TestRunSuggestProviderError(t *testing.T) {
 	oldSelect := selectProviderFunc
-	oldExit := exitFunc
 	oldProvider := providerName
+	oldInput := input
 	oldDebug := dbg
 	t.Cleanup(func() {
 		selectProviderFunc = oldSelect
-		exitFunc = oldExit
 		providerName = oldProvider
+		input = oldInput
 		dbg = oldDebug
 	})
 
 	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
 		return nil, errors.New("provider error")
 	}
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
 	providerName = "mock"
+	input = "test"
 	dbg = false
 
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	runSuggest(cmd, nil)
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1, got %d", exitCode)
+	err := runSuggest(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for provider failure")
 	}
 }
 
 func TestRunSuggestFetchError(t *testing.T) {
 	oldSelect := selectProviderFunc
-	oldExit := exitFunc
 	oldProvider := providerName
+	oldInput := input
 	oldDebug := dbg
 	oldContext := sendContext
 	t.Cleanup(func() {
 		selectProviderFunc = oldSelect
-		exitFunc = oldExit
 		providerName = oldProvider
+		input = oldInput
 		dbg = oldDebug
 		sendContext = oldContext
 	})
@@ -733,35 +654,32 @@ func TestRunSuggestFetchError(t *testing.T) {
 	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
 		return &mockProvider{response: "", err: errors.New("fetch error")}, nil
 	}
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
 	providerName = "mock"
+	input = "test"
 	dbg = false
 	sendContext = false
 
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	runSuggest(cmd, nil)
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1, got %d", exitCode)
+	err := runSuggest(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for fetch failure")
 	}
 }
 
 func TestRunSuggestWriteError(t *testing.T) {
 	oldSelect := selectProviderFunc
-	oldExit := exitFunc
 	oldOutput := outputFile
 	oldProvider := providerName
+	oldInput := input
 	oldDebug := dbg
 	oldContext := sendContext
 	t.Cleanup(func() {
 		selectProviderFunc = oldSelect
-		exitFunc = oldExit
 		outputFile = oldOutput
 		providerName = oldProvider
+		input = oldInput
 		dbg = oldDebug
 		sendContext = oldContext
 	})
@@ -769,20 +687,17 @@ func TestRunSuggestWriteError(t *testing.T) {
 	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
 		return &mockProvider{response: "=ls", err: nil}, nil
 	}
-	exitCode := -1
-	exitFunc = func(code int) {
-		exitCode = code
-	}
 	outputFile = "/nonexistent/path/output.txt"
 	providerName = "mock"
+	input = "test"
 	dbg = false
 	sendContext = false
 
 	cmd := &cobra.Command{}
 	cmd.SetContext(context.Background())
 
-	runSuggest(cmd, nil)
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1, got %d", exitCode)
+	err := runSuggest(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error for write failure")
 	}
 }
