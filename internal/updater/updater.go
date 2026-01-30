@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang.org/x/mod/semver"
 )
 
 var osExecutable = os.Executable
@@ -31,7 +33,8 @@ func CheckUpdate(currentVersion string) (string, string, error) {
 		return "", "", fmt.Errorf("cannot update development version. Please install from releases")
 	}
 
-	resp, err := http.Get(githubAPIURL)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(githubAPIURL)
 	if err != nil {
 		return "", "", err
 	}
@@ -48,13 +51,25 @@ func CheckUpdate(currentVersion string) (string, string, error) {
 	}
 
 	latestVersion := strings.TrimPrefix(release.TagName, "v")
-	if latestVersion == currentVersion {
+
+	currentSemver := "v" + strings.TrimPrefix(currentVersion, "v")
+	latestSemver := "v" + latestVersion
+
+	if semver.IsValid(currentSemver) && semver.IsValid(latestSemver) {
+		if semver.Compare(currentSemver, latestSemver) >= 0 {
+			return latestVersion, "", nil
+		}
+	} else if latestVersion == strings.TrimPrefix(currentVersion, "v") {
 		return latestVersion, "", nil
 	}
 
 	platform := fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)
+	expectedAssetName := fmt.Sprintf("smart-suggestion-%s.tar.gz", platform)
 	for _, asset := range release.Assets {
-		if strings.Contains(asset.Name, platform) {
+		if asset.Name == expectedAssetName {
+			if !strings.HasPrefix(asset.BrowserDownloadURL, "https://") {
+				return "", "", fmt.Errorf("insecure download URL: %s", asset.BrowserDownloadURL)
+			}
 			return latestVersion, asset.BrowserDownloadURL, nil
 		}
 	}
@@ -96,12 +111,81 @@ func InstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to locate extracted plugin")
 	}
 
-	if err := replaceWithBackup(currentBinary, newBinary, 0755); err != nil {
+	binaryBackup := currentBinary + ".backup"
+	pluginBackup := pluginInstallPath + ".backup"
+	binaryBackedUp := false
+	pluginBackedUp := false
+
+	defer func() {
+		if binaryBackedUp {
+			_ = os.Remove(binaryBackup)
+		}
+		if pluginBackedUp {
+			_ = os.Remove(pluginBackup)
+		}
+	}()
+
+	if _, err := os.Stat(currentBinary); err == nil {
+		if err := os.Rename(currentBinary, binaryBackup); err != nil {
+			return fmt.Errorf("failed to backup binary: %w", err)
+		}
+		binaryBackedUp = true
+	}
+
+	if err := copyFile(newBinary, currentBinary); err != nil {
+		if binaryBackedUp {
+			_ = os.Rename(binaryBackup, currentBinary)
+			binaryBackedUp = false
+		}
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
 
-	if err := replaceWithBackup(pluginInstallPath, newPluginPath, 0644); err != nil {
-		return fmt.Errorf("binary updated but failed to install plugin to %s: %w", pluginInstallPath, err)
+	if err := os.Chmod(currentBinary, 0755); err != nil {
+		if binaryBackedUp {
+			_ = os.Remove(currentBinary)
+			_ = os.Rename(binaryBackup, currentBinary)
+			binaryBackedUp = false
+		}
+		return fmt.Errorf("failed to set binary permissions: %w", err)
+	}
+
+	if _, err := os.Stat(pluginInstallPath); err == nil {
+		if err := os.Rename(pluginInstallPath, pluginBackup); err != nil {
+			if binaryBackedUp {
+				_ = os.Remove(currentBinary)
+				_ = os.Rename(binaryBackup, currentBinary)
+				binaryBackedUp = false
+			}
+			return fmt.Errorf("failed to backup plugin: %w", err)
+		}
+		pluginBackedUp = true
+	}
+
+	if err := copyFile(newPluginPath, pluginInstallPath); err != nil {
+		if pluginBackedUp {
+			_ = os.Rename(pluginBackup, pluginInstallPath)
+			pluginBackedUp = false
+		}
+		if binaryBackedUp {
+			_ = os.Remove(currentBinary)
+			_ = os.Rename(binaryBackup, currentBinary)
+			binaryBackedUp = false
+		}
+		return fmt.Errorf("failed to install plugin: %w", err)
+	}
+
+	if err := os.Chmod(pluginInstallPath, 0644); err != nil {
+		if pluginBackedUp {
+			_ = os.Remove(pluginInstallPath)
+			_ = os.Rename(pluginBackup, pluginInstallPath)
+			pluginBackedUp = false
+		}
+		if binaryBackedUp {
+			_ = os.Remove(currentBinary)
+			_ = os.Rename(binaryBackup, currentBinary)
+			binaryBackedUp = false
+		}
+		return fmt.Errorf("failed to set plugin permissions: %w", err)
 	}
 
 	return nil
@@ -199,6 +283,15 @@ func extractTarGz(src, dest string) error {
 	}
 	defer gzr.Close()
 
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
+
+	destAbs, err := filepath.Abs(dest)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
 	tr := tar.NewReader(gzr)
 	for {
 		header, err := tr.Next()
@@ -209,7 +302,11 @@ func extractTarGz(src, dest string) error {
 			return fmt.Errorf("failed to read tar header: %w", err)
 		}
 
-		path := filepath.Join(dest, header.Name)
+		path, err := safeJoinPath(destAbs, header.Name)
+		if err != nil {
+			return fmt.Errorf("unsafe path in archive: %w", err)
+		}
+
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(path, 0755); err != nil {
@@ -219,7 +316,7 @@ func extractTarGz(src, dest string) error {
 			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
-			f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 			if err != nil {
 				return fmt.Errorf("failed to open file for writing: %w", err)
 			}
@@ -230,9 +327,34 @@ func extractTarGz(src, dest string) error {
 			if err := f.Close(); err != nil {
 				return fmt.Errorf("failed to close file: %w", err)
 			}
+		case tar.TypeSymlink, tar.TypeLink:
+			return fmt.Errorf("archive contains unsupported link type: %s", header.Name)
 		}
 	}
 	return nil
+}
+
+func safeJoinPath(dest, name string) (string, error) {
+	cleaned := filepath.Clean(filepath.FromSlash(name))
+
+	if cleaned == "." || cleaned == string(filepath.Separator) {
+		return "", fmt.Errorf("invalid path: %q", name)
+	}
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("absolute path in archive: %q", name)
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path traversal in archive: %q", name)
+	}
+
+	full := filepath.Join(dest, cleaned)
+
+	rel, err := filepath.Rel(dest, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes destination: %q", name)
+	}
+
+	return full, nil
 }
 
 func copyFile(src, dst string) error {

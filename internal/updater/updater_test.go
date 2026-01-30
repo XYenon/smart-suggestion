@@ -374,6 +374,97 @@ func TestExtractTarGz_Error(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_PathTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "malicious.tar.gz")
+	extractDir := filepath.Join(tempDir, "extracted")
+
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	content := "malicious content"
+	hdr := &tar.Header{
+		Name: "../../../etc/passwd",
+		Mode: 0600,
+		Size: int64(len(content)),
+	}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte(content))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	err := extractTarGz(archivePath, extractDir)
+	if err == nil {
+		t.Error("expected error for path traversal, got nil")
+	}
+	if !strings.Contains(err.Error(), "path traversal") && !strings.Contains(err.Error(), "unsafe path") {
+		t.Errorf("expected path traversal error, got: %v", err)
+	}
+}
+
+func TestExtractTarGz_AbsolutePath(t *testing.T) {
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "malicious.tar.gz")
+	extractDir := filepath.Join(tempDir, "extracted")
+
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	content := "malicious content"
+	hdr := &tar.Header{
+		Name: "/etc/passwd",
+		Mode: 0600,
+		Size: int64(len(content)),
+	}
+	tw.WriteHeader(hdr)
+	tw.Write([]byte(content))
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	err := extractTarGz(archivePath, extractDir)
+	if err == nil {
+		t.Error("expected error for absolute path, got nil")
+	}
+	if !strings.Contains(err.Error(), "absolute path") && !strings.Contains(err.Error(), "unsafe path") {
+		t.Errorf("expected absolute path error, got: %v", err)
+	}
+}
+
+func TestExtractTarGz_Symlink(t *testing.T) {
+	tempDir := t.TempDir()
+	archivePath := filepath.Join(tempDir, "malicious.tar.gz")
+	extractDir := filepath.Join(tempDir, "extracted")
+
+	f, _ := os.Create(archivePath)
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+
+	hdr := &tar.Header{
+		Name:     "link",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "/etc/passwd",
+	}
+	tw.WriteHeader(hdr)
+
+	tw.Close()
+	gw.Close()
+	f.Close()
+
+	err := extractTarGz(archivePath, extractDir)
+	if err == nil {
+		t.Error("expected error for symlink, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported link type") {
+		t.Errorf("expected symlink error, got: %v", err)
+	}
+}
+
 func TestCheckUpdate_NoRelease(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, `{
@@ -450,6 +541,50 @@ func TestCheckUpdate_AlreadyUpToDate(t *testing.T) {
 	}
 	if url != "" {
 		t.Errorf("expected empty URL, got %s", url)
+	}
+}
+
+func TestCheckUpdate_CurrentVersionNewer(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"tag_name": "v1.2.3"}`)
+	}))
+	defer ts.Close()
+
+	originalURL := githubAPIURL
+	githubAPIURL = ts.URL
+	defer func() { githubAPIURL = originalURL }()
+
+	version, url, err := CheckUpdate("1.3.0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if version != "1.2.3" {
+		t.Errorf("expected version 1.2.3, got %s", version)
+	}
+	if url != "" {
+		t.Errorf("expected empty URL (current version newer), got %s", url)
+	}
+}
+
+func TestCheckUpdate_WithVPrefix(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, `{"tag_name": "v1.2.3"}`)
+	}))
+	defer ts.Close()
+
+	originalURL := githubAPIURL
+	githubAPIURL = ts.URL
+	defer func() { githubAPIURL = originalURL }()
+
+	version, url, err := CheckUpdate("v1.2.3")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if version != "1.2.3" {
+		t.Errorf("expected version 1.2.3, got %s", version)
+	}
+	if url != "" {
+		t.Errorf("expected empty URL (already up to date), got %s", url)
 	}
 }
 

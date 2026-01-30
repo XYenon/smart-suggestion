@@ -263,32 +263,57 @@ function _do_smart_suggestion() {
 }
 
 function _check_smart_suggestion_updates() {
-    # Check if SMART_SUGGESTION_UPDATE_INTERVAL is a positive integer
-    if [[ "$SMART_SUGGESTION_UPDATE_INTERVAL" -le 0 ]]; then
-        echo "SMART_SUGGESTION_UPDATE_INTERVAL must be a positive integer. Will be reset to default value."
+    [[ -x "$SMART_SUGGESTION_BINARY" ]] || return 0
+
+    # Validate interval is a positive integer
+    if [[ ! "$SMART_SUGGESTION_UPDATE_INTERVAL" =~ ^[0-9]+$ ]] || (( SMART_SUGGESTION_UPDATE_INTERVAL <= 0 )); then
         SMART_SUGGESTION_UPDATE_INTERVAL=7
     fi
 
-    local update_file="$(dirname $SMART_SUGGESTION_BINARY)/.last_update_check"
+    local update_file="${SMART_SUGGESTION_CACHE_DIR}/last_update_check"
+    local lockdir="${SMART_SUGGESTION_CACHE_DIR}/update_check.lock"
     local current_time=$(date +%s)
-    local update_interval=$((SMART_SUGGESTION_UPDATE_INTERVAL * 24 * 3600))  # Convert days to seconds
+    local update_interval=$((SMART_SUGGESTION_UPDATE_INTERVAL * 24 * 3600))
+
+    # Cheap lock using mkdir (atomic operation)
+    mkdir "$lockdir" 2>/dev/null || return 0
+    trap 'rmdir "$lockdir" 2>/dev/null' EXIT
 
     # Check if we should check for updates
     if [[ -f "$update_file" ]]; then
-        local last_check=$(cat "$update_file" 2>/dev/null || echo "0")
-        local time_diff=$((current_time - last_check))
-
-        if [[ $time_diff -lt $update_interval ]]; then
-            return 0  # Too soon to check again
+        local last_check
+        last_check=$(<"$update_file" 2>/dev/null)
+        # Validate last_check is a number
+        if [[ "$last_check" =~ ^[0-9]+$ ]]; then
+            local time_diff=$((current_time - last_check))
+            if (( time_diff < update_interval )); then
+                rmdir "$lockdir" 2>/dev/null
+                trap - EXIT
+                return 0
+            fi
         fi
     fi
 
     # Update the last check time
-    echo "$current_time" > "$update_file"
+    print -r -- "$current_time" >| "$update_file" 2>/dev/null
 
-    # Check for updates in background
-    ("$SMART_SUGGESTION_BINARY" update --check-only 2>/dev/null && \
-        echo "Smart Suggestion update available! Run 'smart-suggestion update' to update." || true) &
+    # Check for updates in background, write flag file instead of printing
+    {
+        if "$SMART_SUGGESTION_BINARY" update --check-only >/dev/null 2>&1; then
+            : >| "${SMART_SUGGESTION_CACHE_DIR}/update_available"
+        fi
+    } &!
+
+    rmdir "$lockdir" 2>/dev/null
+    trap - EXIT
+}
+
+function _smart_suggestion_update_notify() {
+    local flag_file="${SMART_SUGGESTION_CACHE_DIR}/update_available"
+    if [[ -f "$flag_file" ]]; then
+        rm -f "$flag_file"
+        echo "Smart Suggestion update available! Run '$SMART_SUGGESTION_BINARY update' to update."
+    fi
 }
 
 function smart-suggestion() {
@@ -316,4 +341,14 @@ fi
 # Add update check to plugin initialization
 if [[ "$SMART_SUGGESTION_AUTO_UPDATE" == "true" ]]; then
     _check_smart_suggestion_updates
+    # Add precmd hook to show update notification (once per session)
+    typeset -g _SMART_SUGGESTION_UPDATE_NOTIFIED=false
+    function _smart_suggestion_precmd_update_hook() {
+        if [[ "$_SMART_SUGGESTION_UPDATE_NOTIFIED" == "false" ]]; then
+            _smart_suggestion_update_notify
+            _SMART_SUGGESTION_UPDATE_NOTIFIED=true
+        fi
+    }
+    autoload -Uz add-zsh-hook
+    add-zsh-hook precmd _smart_suggestion_precmd_update_hook
 fi
