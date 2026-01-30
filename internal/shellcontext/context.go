@@ -279,11 +279,19 @@ func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 			lines = append(lines, scanner.Text())
 		}
 	} else {
+		ring := make([]string, maxLines)
+		pos := 0
+		count := 0
 		for scanner.Scan() {
-			lines = append(lines, scanner.Text())
-			if len(lines) > maxLines {
-				lines = lines[1:]
-			}
+			ring[pos] = scanner.Text()
+			pos = (pos + 1) % maxLines
+			count++
+		}
+
+		if count < maxLines {
+			lines = ring[:count]
+		} else {
+			lines = append(ring[pos:], ring[:pos]...)
 		}
 	}
 
