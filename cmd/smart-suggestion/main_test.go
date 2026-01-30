@@ -251,7 +251,9 @@ func TestRunUpdateCheckOnlyUpdateAvailable(t *testing.T) {
 	checkUpdateFunc = func(currentVersion string) (string, string, error) {
 		return "1.1.0", "https://example.com/update", nil
 	}
+	installCalled := false
 	installUpdateFunc = func(url string) error {
+		installCalled = true
 		return nil
 	}
 
@@ -262,6 +264,9 @@ func TestRunUpdateCheckOnlyUpdateAvailable(t *testing.T) {
 	runUpdate(cmd, nil)
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if installCalled {
+		t.Fatal("expected installUpdateFunc not to be called in --check-only mode")
 	}
 }
 
@@ -513,10 +518,12 @@ func TestRunRotateLogsForceRotateError(t *testing.T) {
 	oldExit := exitFunc
 	oldLogFile := proxyLogFile
 	oldDebug := dbg
+	oldStdout := os.Stdout
 	t.Cleanup(func() {
 		exitFunc = oldExit
 		proxyLogFile = oldLogFile
 		dbg = oldDebug
+		os.Stdout = oldStdout
 	})
 
 	exitCode := -1
@@ -526,9 +533,21 @@ func TestRunRotateLogsForceRotateError(t *testing.T) {
 	proxyLogFile = file
 	dbg = false
 
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+
 	runRotateLogs(nil, nil)
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1 for rotate error, got %d", exitCode)
+	}
+	if bytes.Contains(out, []byte("Successfully rotated")) {
+		t.Fatalf("expected no success output on failure, got %q", string(out))
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 )
 
 var osExecutable = os.Executable
+var replaceWithBackupFunc = replaceWithBackup
 
 type GitHubRelease struct {
 	TagName string `json:"tag_name"`
@@ -111,19 +112,39 @@ func InstallUpdate(downloadURL string) error {
 		return fmt.Errorf("failed to locate extracted plugin")
 	}
 
-	cleanupBinaryBackup, err := replaceWithBackup(currentBinary, newBinary, 0755)
+	cleanupBinaryBackup, err := replaceWithBackupFunc(currentBinary, newBinary, 0755)
 	if err != nil {
 		return fmt.Errorf("failed to install new binary: %w", err)
 	}
-	defer cleanupBinaryBackup()
 
-	cleanupPluginBackup, err := replaceWithBackup(pluginInstallPath, newPluginPath, 0644)
+	cleanupPluginBackup, err := replaceWithBackupFunc(pluginInstallPath, newPluginPath, 0644)
 	if err != nil {
+		rollbackErr := rollbackFromBackup(currentBinary)
+		if rollbackErr != nil {
+			return fmt.Errorf("failed to install plugin: %w (also failed to rollback binary: %v)", err, rollbackErr)
+		}
 		return fmt.Errorf("failed to install plugin: %w", err)
 	}
 	defer cleanupPluginBackup()
+	defer cleanupBinaryBackup()
 
 	return nil
+}
+
+func rollbackFromBackup(targetPath string) error {
+	backupPath := targetPath + ".backup"
+
+	if _, err := os.Stat(backupPath); err != nil {
+		return err
+	}
+
+	if err := os.Rename(backupPath, targetPath); err == nil {
+		return nil
+	}
+
+	// Best-effort fallback for platforms/filesystems where rename won't replace.
+	_ = os.Remove(targetPath)
+	return os.Rename(backupPath, targetPath)
 }
 
 func replaceWithBackup(targetPath, sourcePath string, mode os.FileMode) (func(), error) {
