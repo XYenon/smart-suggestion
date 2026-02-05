@@ -42,7 +42,7 @@ func TestReadLatestLines(t *testing.T) {
 	})
 }
 
-func TestBuildContextInfoSections(t *testing.T) {
+func TestBuildContextSections(t *testing.T) {
 	setEnv := func(key, value string) func() {
 		old := os.Getenv(key)
 		_ = os.Setenv(key, value)
@@ -62,18 +62,23 @@ func TestBuildContextInfoSections(t *testing.T) {
 		cleanupShell()
 	})
 
-	contextInfo, err := BuildContextInfo(0, "")
+	systemContext, err := BuildSystemContext()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(contextInfo, "# This is the alias defined in your shell:") {
-		t.Fatal("expected alias section")
+	if !strings.Contains(systemContext, "# This is the alias defined in your shell:") {
+		t.Fatal("expected alias section in system context")
 	}
-	if !strings.Contains(contextInfo, "# Available PATH commands:") {
-		t.Fatal("expected commands section")
+	if !strings.Contains(systemContext, "# Available PATH commands:") {
+		t.Fatal("expected commands section in system context")
 	}
-	if !strings.Contains(contextInfo, "# Shell history:") {
-		t.Fatal("expected history section")
+
+	userContext, err := BuildUserContext(0, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(userContext, "# Shell history:") {
+		t.Fatal("expected history section in user context")
 	}
 }
 
@@ -445,12 +450,16 @@ func TestGetScrollbackError(t *testing.T) {
 	}
 }
 
-func TestBuildContextInfoNegativeLines(t *testing.T) {
-	info, err := BuildContextInfo(-10, "")
+func TestBuildUserContextNegativeLines(t *testing.T) {
+	infoNegative, err := BuildUserContext(-10, "")
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error with negative lines: %v", err)
 	}
-	if !strings.Contains(info, "# Context:") {
-		t.Fatal("expected context header")
+	infoZero, err := BuildUserContext(0, "")
+	if err != nil {
+		t.Fatalf("unexpected error with zero lines: %v", err)
+	}
+	if infoNegative != infoZero {
+		t.Fatalf("expected same output for negative and zero lines, got (negative) %q and (zero) %q", infoNegative, infoZero)
 	}
 }

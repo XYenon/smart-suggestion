@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -16,37 +15,64 @@ import (
 
 func TestResolveSystemPrompt(t *testing.T) {
 	original := systemPrompt
-	defer func() { systemPrompt = original }()
+	oldBuildSystemContext := buildSystemContextFunc
+	t.Cleanup(func() {
+		systemPrompt = original
+		buildSystemContextFunc = oldBuildSystemContext
+	})
+
+	buildSystemContextFunc = func() (string, error) {
+		return "", nil
+	}
 
 	systemPrompt = ""
-	if got := resolveSystemPrompt(); got != defaultSystemPrompt {
+	if got := resolveSystemPrompt(false); got != defaultSystemPrompt {
 		t.Fatalf("expected default prompt, got %q", got)
 	}
 
 	systemPrompt = "custom"
-	if got := resolveSystemPrompt(); got != "custom" {
+	if got := resolveSystemPrompt(false); got != "custom" {
 		t.Fatalf("expected custom prompt, got %q", got)
+	}
+
+	// Test with sendContext=true to verify context concatenation
+	buildSystemContextFunc = func() (string, error) {
+		return "mocked system context", nil
+	}
+	systemPrompt = ""
+	got := resolveSystemPrompt(true)
+	if got != defaultSystemPrompt+"\n\n"+"mocked system context" {
+		t.Fatalf("expected prompt with context, got %q", got)
+	}
+
+	// Test with sendContext=true and custom prompt
+	systemPrompt = "custom"
+	got = resolveSystemPrompt(true)
+	if got != "custom\n\nmocked system context" {
+		t.Fatalf("expected custom prompt with context, got %q", got)
 	}
 }
 
-func TestBuildPromptWithScrollback(t *testing.T) {
-	old := buildContextInfoFunc
-	buildContextInfoFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
+func TestBuildUserInputWithScrollback(t *testing.T) {
+	old := buildUserContextFunc
+	buildUserContextFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
 		return "", nil
 	}
-	t.Cleanup(func() { buildContextInfoFunc = old })
+	t.Cleanup(func() { buildUserContextFunc = old })
 
 	file := filepath.Join(t.TempDir(), "scrollback.txt")
 	if err := os.WriteFile(file, []byte("first\nsecond\n"), 0644); err != nil {
 		t.Fatalf("failed to write scrollback file: %v", err)
 	}
 
-	buildContextInfoFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
-		return "second", nil
+	buildUserContextFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
+		return "# Scrollback:\n\nsecond", nil
 	}
 
-	if got := buildPrompt(1, file, true); !bytes.Contains([]byte(got), []byte("second")) {
-		t.Fatalf("expected scrollback content, got %q", got)
+	got := buildUserInput("test", 1, file, true)
+	expected := "# Scrollback:\n\nsecond\n\n# User input:\n\ntest"
+	if got != expected {
+		t.Fatalf("expected user input with scrollback content, got %q, want %q", got, expected)
 	}
 }
 
@@ -281,41 +307,35 @@ func TestRunUpdateCheckOnlyUpdateAvailable(t *testing.T) {
 	}
 }
 
-func TestBuildPromptNoContext(t *testing.T) {
-	old := buildContextInfoFunc
-	oldPrompt := systemPrompt
+func TestBuildUserInputNoContext(t *testing.T) {
+	old := buildUserContextFunc
 	t.Cleanup(func() {
-		buildContextInfoFunc = old
-		systemPrompt = oldPrompt
+		buildUserContextFunc = old
 	})
 
-	systemPrompt = "base prompt"
-	buildContextInfoFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
+	buildUserContextFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
 		return "extra context info", nil
 	}
 
-	prompt := buildPrompt(10, "", false)
-	if bytes.Contains([]byte(prompt), []byte("extra context info")) {
-		t.Fatal("expected no context when sendContext is false")
+	userInput := buildUserInput("test input", 10, "", false)
+	if userInput != "test input" {
+		t.Fatalf("expected 'test input' when sendContext is false, got %q", userInput)
 	}
 }
 
-func TestBuildPromptContextError(t *testing.T) {
-	old := buildContextInfoFunc
-	oldPrompt := systemPrompt
+func TestBuildUserInputContextError(t *testing.T) {
+	old := buildUserContextFunc
 	t.Cleanup(func() {
-		buildContextInfoFunc = old
-		systemPrompt = oldPrompt
+		buildUserContextFunc = old
 	})
 
-	systemPrompt = ""
-	buildContextInfoFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
+	buildUserContextFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
 		return "", errors.New("fail")
 	}
 
-	prompt := buildPrompt(10, "", true)
-	if prompt != defaultSystemPrompt {
-		t.Fatalf("expected default prompt on error, got %q", prompt)
+	userInput := buildUserInput("test input", 10, "", true)
+	if userInput != "test input" {
+		t.Fatalf("expected 'test input' on error, got %q", userInput)
 	}
 }
 
