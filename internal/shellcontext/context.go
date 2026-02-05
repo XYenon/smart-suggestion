@@ -20,22 +20,31 @@ var (
 	runtimeGOOS = runtime.GOOS
 )
 
-func BuildContextInfo(scrollbackLines int, scrollbackFile string) (string, error) {
-	if scrollbackLines < 0 {
-		scrollbackLines = 0
-	}
-
+// BuildSystemContext builds context info for system prompt (static: header, aliases, commands)
+func BuildSystemContext() (string, error) {
 	var builder strings.Builder
 	builder.WriteString(buildContextHeader())
 
 	appendContextSection(&builder, "This is the alias defined in your shell", getAliases)
 	appendContextSection(&builder, "Available PATH commands", getAvailableCommands)
+
+	return strings.TrimSpace(builder.String()), nil
+}
+
+// BuildUserContext builds context info for user message (dynamic: history, scrollback)
+func BuildUserContext(scrollbackLines int, scrollbackFile string) (string, error) {
+	if scrollbackLines < 0 {
+		scrollbackLines = 0
+	}
+
+	var builder strings.Builder
+
 	appendContextSection(&builder, "Shell history", getHistory)
 	appendContextSection(&builder, "Scrollback", func() (string, error) {
 		return getScrollback(scrollbackLines, scrollbackFile)
 	})
 
-	return builder.String(), nil
+	return strings.TrimSpace(builder.String()), nil
 }
 
 func buildContextHeader() string {

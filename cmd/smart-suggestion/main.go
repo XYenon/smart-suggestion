@@ -158,7 +158,8 @@ var (
 )
 
 var exitFunc = os.Exit
-var buildContextInfoFunc = shellcontext.BuildContextInfo
+var buildSystemContextFunc = shellcontext.BuildSystemContext
+var buildUserContextFunc = shellcontext.BuildUserContext
 var runProxyFunc = proxy.RunProxy
 var checkUpdateFunc = updater.CheckUpdate
 var installUpdateFunc = updater.InstallUpdate
@@ -174,28 +175,45 @@ func init() {
 	logRotator = pkg.NewLogRotator(config)
 }
 
-func resolveSystemPrompt() string {
-	if systemPrompt == "" {
-		return defaultSystemPrompt
+func resolveSystemPrompt(sendContext bool) string {
+	basePrompt := defaultSystemPrompt
+	if systemPrompt != "" {
+		basePrompt = systemPrompt
 	}
-	return systemPrompt
-}
 
-func buildPrompt(scrollbackLines int, scrollbackFile string, sendContext bool) string {
-	basePrompt := resolveSystemPrompt()
 	if !sendContext {
 		return basePrompt
 	}
 
-	contextInfo, err := buildContextInfoFunc(scrollbackLines, scrollbackFile)
+	systemContext, err := buildSystemContextFunc()
 	if err != nil {
-		debug.Log("Failed to build context info", map[string]any{
+		debug.Log("Failed to build system context", map[string]any{
 			"error": err.Error(),
 		})
 		return basePrompt
 	}
 
-	return basePrompt + "\n\n" + contextInfo
+	return basePrompt + "\n\n" + systemContext
+}
+
+func buildUserInput(input string, scrollbackLines int, scrollbackFile string, sendContext bool) string {
+	if !sendContext {
+		return input
+	}
+
+	userContext, err := buildUserContextFunc(scrollbackLines, scrollbackFile)
+	if err != nil {
+		debug.Log("Failed to build user context", map[string]any{
+			"error": err.Error(),
+		})
+		return input
+	}
+
+	if userContext == "" {
+		return input
+	}
+
+	return userContext + "\n\n# User input:\n\n" + input
 }
 
 func selectProvider(ctx *cobra.Command) (provider.Provider, error) {
@@ -306,25 +324,26 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"input\" not set")
 	}
 
-	completePrompt := buildPrompt(scrollbackLines, scrollbackFile, sendContext)
+	systemPromptStr := resolveSystemPrompt(sendContext)
+	userInput := buildUserInput(input, scrollbackLines, scrollbackFile, sendContext)
 	providerClient, err := selectProviderFunc(cmd)
 
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
 			"error":    err.Error(),
 			"provider": providerName,
-			"input":    input,
+			"input":    userInput,
 		})
 
 		return fmt.Errorf("error fetching suggestions from %s API: %w", providerName, err)
 	}
 
-	suggestion, err := providerClient.FetchWithHistory(cmd.Context(), input, completePrompt, getExampleHistory())
+	suggestion, err := providerClient.FetchWithHistory(cmd.Context(), userInput, systemPromptStr, getExampleHistory())
 	if err != nil {
 		debug.Log("Error occurred", map[string]any{
 			"error":    err.Error(),
 			"provider": providerName,
-			"input":    input,
+			"input":    userInput,
 		})
 
 		return fmt.Errorf("error fetching suggestions from %s API: %w", providerName, err)
@@ -334,7 +353,7 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 
 	debug.Log("Successfully fetched suggestion", map[string]any{
 		"provider":          providerName,
-		"input":             input,
+		"input":             userInput,
 		"original_response": suggestion,
 		"parsed_suggestion": finalSuggestion,
 	})
