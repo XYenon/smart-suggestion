@@ -53,7 +53,9 @@ Example of your full response format:
 func getExampleHistory() []provider.Message {
 	return []provider.Message{
 		// Example 1: New command for listing files
-		{Role: "user", Content: "list files in current directory"},
+		{Role: "user", Content: `# User input:
+
+list files in current directory`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user wants to list files.
 2. No previous command.
@@ -62,7 +64,13 @@ func getExampleHistory() []provider.Message {
 =ls`},
 
 		// Example 2: New command after viewing log file details
-		{Role: "user", Content: "Shell history: 'ls -l /tmp/smart-suggestion.log'"},
+		{Role: "user", Content: `# Shell history:
+
+ls -l /tmp/smart-suggestion.log
+
+# User input:
+
+`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user just listed details of a log file. A common next step is to view the content of that file.
 2. Listing the file does not show its content.
@@ -71,11 +79,16 @@ func getExampleHistory() []provider.Message {
 =cat /tmp/smart-suggestion.log`},
 
 		// Example 3: New command for CrashLoopBackOff pods
-		{Role: "user", Content: `Scrollback:
+		{Role: "user", Content: `# Scrollback:
+
 # k -n my-namespace get pod
 NAME           READY   STATUS             RESTARTS         AGE
 pod-name-aaa   2/3     CrashLoopBackOff   358 (111s ago)   30h
-pod-name-bbb   2/3     CrashLoopBackOff   358 (3m8s ago)   30h`},
+pod-name-bbb   2/3     CrashLoopBackOff   358 (3m8s ago)   30h
+
+# User input:
+
+`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods in a Kubernetes namespace.
 2. The pods are in 'CrashLoopBackOff', indicating a problem. The user likely wants to see the logs to debug.
@@ -84,11 +97,16 @@ pod-name-bbb   2/3     CrashLoopBackOff   358 (3m8s ago)   30h`},
 =kubectl -n my-namespace logs pod-name-aaa`},
 
 		// Example 4: New command for pending pod
-		{Role: "user", Content: `Scrollback:
+		{Role: "user", Content: `# Scrollback:
+
 # k -n my-namespace get pod
 NAME           READY   STATUS             RESTARTS         AGE
 pod-name-aaa   3/3     Running            0                30h
-pod-name-bbb   0/3     Pending            0                30h`},
+pod-name-bbb   0/3     Pending            0                30h
+
+# User input:
+
+`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods. One pod is 'Pending'.
 2. The 'get pod' command doesn't say why it's pending.
@@ -97,11 +115,16 @@ pod-name-bbb   0/3     Pending            0                30h`},
 =kubectl -n my-namespace describe pod pod-name-bbb`},
 
 		// Example 5: New command for NotReady node
-		{Role: "user", Content: `Scrollback:
+		{Role: "user", Content: `# Scrollback:
+
 # k get node
 NAME      STATUS   ROLES    AGE   VERSION
 node-aaa  Ready    <none>   3h    v1.25.3
-node-bbb  NotReady <none>   3h    v1.25.3`},
+node-bbb  NotReady <none>   3h    v1.25.3
+
+# User input:
+
+`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user is checking Kubernetes nodes. One node is 'NotReady'.
 2. 'get node' does not show the reason for the 'NotReady' status.
@@ -110,7 +133,9 @@ node-bbb  NotReady <none>   3h    v1.25.3`},
 =kubectl describe node node-bbb`},
 
 		// Example 6: Completion for cd command
-		{Role: "user", Content: "cd /tm"},
+		{Role: "user", Content: `# User input:
+
+cd /tm`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user wants to change directory to a temporary folder.
 2. The user has typed '/tm' which is likely an abbreviation for '/tmp'.
@@ -119,12 +144,16 @@ node-bbb  NotReady <none>   3h    v1.25.3`},
 +p`},
 
 		// Example 7: Completion for kubectl command
-		{Role: "user", Content: `Scrollback:
+		{Role: "user", Content: `# Scrollback:
+
 # k -n my-namespace get pod
 NAME           READY   STATUS             RESTARTS         AGE
 pod-name-aaa   3/3     Running            0                30h
 pod-name-bbb   0/3     Pending            0                30h
-User input: k -n`},
+
+# User input:
+
+k -n`},
 		{Role: "assistant", Content: `<reasoning>
 1. The user is checking pods. One pod is 'Pending'. They started typing a command.
 2. 'get pod' was useful but now they want to investigate 'pod-name-bbb'.
