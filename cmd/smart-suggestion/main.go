@@ -441,18 +441,21 @@ func runUpdate(cmd *cobra.Command, args []string) {
 	latest, url, err := checkUpdateFunc(Version)
 	if err != nil {
 		fmt.Printf("Check failed: %v\n", err)
+		if checkOnly {
+			exitFunc(1)
+		}
 		return
 	}
 	if url == "" {
 		fmt.Println("Smart Suggestion is already up to date!")
 		if checkOnly {
-			exitFunc(0)
+			exitFunc(1)
 		}
 		return
 	}
 	if checkOnly {
 		fmt.Printf("New version %s available.\n", latest)
-		exitFunc(1)
+		exitFunc(0)
 		return
 	}
 	fmt.Printf("New version %s available. Installing...\n", latest)

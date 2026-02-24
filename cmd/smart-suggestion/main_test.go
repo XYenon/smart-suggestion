@@ -266,8 +266,8 @@ func TestRunUpdateCheckOnlyAlreadyLatest(t *testing.T) {
 	_ = cmd.Flags().Set("check-only", "true")
 
 	runUpdate(cmd, nil)
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", exitCode)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
 	}
 }
 
@@ -299,8 +299,8 @@ func TestRunUpdateCheckOnlyUpdateAvailable(t *testing.T) {
 	_ = cmd.Flags().Set("check-only", "true")
 
 	runUpdate(cmd, nil)
-	if exitCode != 1 {
-		t.Fatalf("expected exit code 1, got %d", exitCode)
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
 	if installCalled {
 		t.Fatal("expected installUpdateFunc not to be called in --check-only mode")
@@ -453,6 +453,32 @@ func TestRunUpdateCheckError(t *testing.T) {
 	cmd.Flags().Bool("check-only", false, "")
 
 	runUpdate(cmd, nil)
+}
+
+func TestRunUpdateCheckOnlyCheckError(t *testing.T) {
+	oldExit := exitFunc
+	oldCheck := checkUpdateFunc
+	t.Cleanup(func() {
+		exitFunc = oldExit
+		checkUpdateFunc = oldCheck
+	})
+
+	exitCode := -1
+	exitFunc = func(code int) {
+		exitCode = code
+	}
+	checkUpdateFunc = func(currentVersion string) (string, string, error) {
+		return "", "", errors.New("network error")
+	}
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("check-only", true, "")
+	_ = cmd.Flags().Set("check-only", "true")
+
+	runUpdate(cmd, nil)
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
 }
 
 func TestRunUpdateInstallError(t *testing.T) {
