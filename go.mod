@@ -1,14 +1,14 @@
 module github.com/xyenon/smart-suggestion
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.19.0
 	github.com/creack/pty v1.1.24
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.32.0
-	golang.org/x/term v0.39.0
+	golang.org/x/mod v0.35.0
+	golang.org/x/term v0.43.0
 	google.golang.org/genai v1.43.0
 )
 
@@ -38,10 +38,10 @@ require (
 	go.opentelemetry.io/otel v1.41.0 // indirect
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
-	golang.org/x/crypto v0.47.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.33.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
 	google.golang.org/grpc v1.80.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
