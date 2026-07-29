@@ -579,7 +579,7 @@ func TestProxyNotStartedWithoutTTY(t *testing.T) {
 	}
 
 	script := fmt.Sprintf("source %q\necho PLUGIN_SOURCED\n", pluginPath)
-	cmd := exec.Command("zsh", "-f", "-i", "-c", script)
+	cmd := exec.CommandContext(t.Context(), "zsh", "-f", "-i", "-c", script)
 	cmd.Dir = projectRoot
 	cmd.Stdin = strings.NewReader("")
 	cmd.Env = append(os.Environ(),
@@ -593,6 +593,10 @@ func TestProxyNotStartedWithoutTTY(t *testing.T) {
 		"SMART_SUGGESTION_AUTO_UPDATE=false",
 		"SMART_SUGGESTION_PROXY_MODE=true",
 		"MOCK_PROXY_LOG="+mockLogPath,
+		"TMUX=",
+		"KITTY_LISTEN_ON=",
+		"GHOSTTY_RESOURCES_DIR=",
+		"SMART_SUGGESTION_PROXY_ACTIVE=",
 	)
 
 	out, err := cmd.CombinedOutput()
@@ -626,7 +630,7 @@ func TestProxyStartedWithTTY(t *testing.T) {
 	}
 
 	script := fmt.Sprintf("source %q\n", pluginPath)
-	cmd := exec.Command("zsh", "-f", "-i", "-c", script)
+	cmd := exec.CommandContext(t.Context(), "zsh", "-f", "-i", "-c", script)
 	cmd.Dir = projectRoot
 	cmd.Env = append(os.Environ(),
 		"ZDOTDIR="+tmpDir,
@@ -638,6 +642,10 @@ func TestProxyStartedWithTTY(t *testing.T) {
 		"SMART_SUGGESTION_BINARY="+mockBinPath,
 		"SMART_SUGGESTION_AUTO_UPDATE=false",
 		"SMART_SUGGESTION_PROXY_MODE=true",
+		"TMUX=",
+		"KITTY_LISTEN_ON=",
+		"GHOSTTY_RESOURCES_DIR=",
+		"SMART_SUGGESTION_PROXY_ACTIVE=",
 	)
 
 	terminal, err := pty.Start(cmd)
