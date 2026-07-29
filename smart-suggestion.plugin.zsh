@@ -82,7 +82,7 @@ else
 fi
 
 function _run_smart_suggestion_proxy() {
-    if [[ $- == *i* ]]; then
+    if [[ $- == *i* && -t 0 ]]; then
         exec "$SMART_SUGGESTION_BINARY" proxy --scrollback-lines "$SMART_SUGGESTION_SCROLLBACK_LINES"
     fi
 }

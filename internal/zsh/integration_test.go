@@ -558,3 +558,131 @@ fi
 		t.Errorf("Plugin did not define _do_smart_suggestion. Output:\n%s", string(out))
 	}
 }
+
+func TestProxyNotStartedWithoutTTY(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get wd: %v", err)
+	}
+	projectRoot, err := filepath.Abs(filepath.Join(cwd, "..", ".."))
+	if err != nil {
+		t.Fatalf("Failed to get project root: %v", err)
+	}
+	pluginPath := filepath.Join(projectRoot, "smart-suggestion.plugin.zsh")
+
+	tmpDir := t.TempDir()
+	mockBinPath := filepath.Join(tmpDir, "smart-suggestion-bin")
+	mockLogPath := filepath.Join(tmpDir, "proxy.log")
+	mockBinContent := "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$MOCK_PROXY_LOG\"\n"
+	if err := os.WriteFile(mockBinPath, []byte(mockBinContent), 0755); err != nil {
+		t.Fatalf("Failed to create mock binary: %v", err)
+	}
+
+	script := fmt.Sprintf("source %q\necho PLUGIN_SOURCED\n", pluginPath)
+	cmd := exec.CommandContext(t.Context(), "zsh", "-f", "-i", "-c", script)
+	cmd.Dir = projectRoot
+	cmd.Stdin = strings.NewReader("")
+	cmd.Env = append(os.Environ(),
+		"ZDOTDIR="+tmpDir,
+		"HOME="+tmpDir,
+		"XDG_CACHE_HOME="+tmpDir,
+		"XDG_CONFIG_HOME="+tmpDir,
+		"OPENAI_API_KEY=fake-key",
+		"SMART_SUGGESTION_AI_PROVIDER=openai",
+		"SMART_SUGGESTION_BINARY="+mockBinPath,
+		"SMART_SUGGESTION_AUTO_UPDATE=false",
+		"SMART_SUGGESTION_PROXY_MODE=true",
+		"MOCK_PROXY_LOG="+mockLogPath,
+		"TMUX=",
+		"KITTY_LISTEN_ON=",
+		"GHOSTTY_RESOURCES_DIR=",
+		"SMART_SUGGESTION_PROXY_ACTIVE=",
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Command failed with %v: %s", err, string(out))
+	}
+	if !strings.Contains(string(out), "PLUGIN_SOURCED") {
+		t.Fatalf("Plugin did not return control without a TTY. Output:\n%s", string(out))
+	}
+	if _, err := os.Stat(mockLogPath); !os.IsNotExist(err) {
+		t.Fatalf("Proxy started without a TTY; stat error: %v", err)
+	}
+}
+
+func TestProxyStartedWithTTY(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get wd: %v", err)
+	}
+	projectRoot, err := filepath.Abs(filepath.Join(cwd, "..", ".."))
+	if err != nil {
+		t.Fatalf("Failed to get project root: %v", err)
+	}
+	pluginPath := filepath.Join(projectRoot, "smart-suggestion.plugin.zsh")
+
+	tmpDir := t.TempDir()
+	mockBinPath := filepath.Join(tmpDir, "smart-suggestion-bin")
+	mockBinContent := "#!/bin/sh\necho \"PROXY_STARTED:$*\"\n"
+	if err := os.WriteFile(mockBinPath, []byte(mockBinContent), 0755); err != nil {
+		t.Fatalf("Failed to create mock binary: %v", err)
+	}
+
+	script := fmt.Sprintf("source %q\n", pluginPath)
+	cmd := exec.CommandContext(t.Context(), "zsh", "-f", "-i", "-c", script)
+	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(),
+		"ZDOTDIR="+tmpDir,
+		"HOME="+tmpDir,
+		"XDG_CACHE_HOME="+tmpDir,
+		"XDG_CONFIG_HOME="+tmpDir,
+		"OPENAI_API_KEY=fake-key",
+		"SMART_SUGGESTION_AI_PROVIDER=openai",
+		"SMART_SUGGESTION_BINARY="+mockBinPath,
+		"SMART_SUGGESTION_AUTO_UPDATE=false",
+		"SMART_SUGGESTION_PROXY_MODE=true",
+		"TMUX=",
+		"KITTY_LISTEN_ON=",
+		"GHOSTTY_RESOURCES_DIR=",
+		"SMART_SUGGESTION_PROXY_ACTIVE=",
+	)
+
+	terminal, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("Failed to start zsh with a TTY: %v", err)
+	}
+	defer terminal.Close()
+
+	outputCh := make(chan string, 1)
+	go func() {
+		var output bytes.Buffer
+		buf := make([]byte, 1024)
+		for {
+			n, readErr := terminal.Read(buf)
+			if n > 0 {
+				output.Write(buf[:n])
+			}
+			if readErr != nil {
+				outputCh <- output.String()
+				return
+			}
+		}
+	}()
+
+	var output string
+	select {
+	case output = <-outputCh:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal("Timed out waiting for proxy to start")
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("Proxy process failed: %v. Output:\n%s", err, output)
+	}
+
+	if !strings.Contains(output, "PROXY_STARTED:proxy --scrollback-lines 100") {
+		t.Fatalf("Proxy did not start with a TTY. Output:\n%s", output)
+	}
+}
