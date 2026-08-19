@@ -7,12 +7,14 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/azure"
+	"github.com/openai/openai-go/shared"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
 type AzureOpenAIProvider struct {
-	DeploymentName string
-	Client         *openai.Client
+	DeploymentName  string
+	ReasoningEffort shared.ReasoningEffort
+	Client          *openai.Client
 }
 
 func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
@@ -35,6 +37,8 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 
 	apiVersion := envOrDefault(os.Getenv("AZURE_OPENAI_API_VERSION"), "2024-10-21")
 
+	reasoningEffort := shared.ReasoningEffort(os.Getenv("AZURE_OPENAI_REASONING_EFFORT"))
+
 	var endpoint string
 	if baseURL != "" {
 		endpoint = normalizeBaseURL(baseURL)
@@ -48,8 +52,9 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 	)
 
 	return &AzureOpenAIProvider{
-		DeploymentName: deploymentName,
-		Client:         &client,
+		DeploymentName:  deploymentName,
+		ReasoningEffort: reasoningEffort,
+		Client:          &client,
 	}, nil
 }
 
@@ -62,13 +67,15 @@ func (p *AzureOpenAIProvider) FetchWithHistory(ctx context.Context, input string
 
 	messages := buildOpenAIChatMessages(systemPrompt, input, history)
 
-	resp, err := p.Client.Chat.Completions.New(
-		ctx,
-		openai.ChatCompletionNewParams{
-			Model:    openai.ChatModel(p.DeploymentName),
-			Messages: messages,
-		},
-	)
+	params := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(p.DeploymentName),
+		Messages: messages,
+	}
+	if p.ReasoningEffort != "" {
+		params.ReasoningEffort = p.ReasoningEffort
+	}
+
+	resp, err := p.Client.Chat.Completions.New(ctx, params)
 	debug.Log("Received Azure OpenAI response", map[string]any{
 		"response": resp,
 	})

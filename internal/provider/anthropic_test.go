@@ -23,6 +23,22 @@ func TestNewAnthropicProvider(t *testing.T) {
 	if p.Model != "claude-3-5-sonnet-20241022" {
 		t.Errorf("expected model claude-3-5-sonnet-20241022, got %s", p.Model)
 	}
+	if p.ReasoningEffort != "" {
+		t.Errorf("expected default reasoning effort to be empty, got %s", p.ReasoningEffort)
+	}
+
+	// With ANTHROPIC_REASONING_EFFORT
+	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
+		os.Setenv("ANTHROPIC_REASONING_EFFORT", effort)
+		p, err = NewAnthropicProvider()
+		os.Unsetenv("ANTHROPIC_REASONING_EFFORT")
+		if err != nil {
+			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
+		}
+		if p.ReasoningEffort != effort {
+			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
+		}
+	}
 }
 
 func TestNewAnthropicProvider_Errors(t *testing.T) {
@@ -78,6 +94,50 @@ func TestAnthropicProvider_Fetch(t *testing.T) {
 			}`,
 			ExpectedError: "no content returned from Anthropic API",
 		},
+		{
+			Name:         "successful suggestion with thinking block",
+			Input:        "how to list files",
+			SystemPrompt: "you are a shell assistant",
+			MockStatus:   http.StatusOK,
+			MockResponse: `{
+				"id": "msg_789",
+				"type": "message",
+				"role": "assistant",
+				"model": "claude-3-7-sonnet-20250219",
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "Thinking about listing files..."
+					},
+					{
+						"type": "text",
+						"text": "<reasoning>The user wants to list files.</reasoning>=ls -la"
+					}
+				],
+				"stop_reason": "end_turn"
+			}`,
+			ExpectedOutput: "=ls -la",
+		},
+		{
+			Name:         "thinking block only (no text content)",
+			Input:        "test",
+			SystemPrompt: "test",
+			MockStatus:   http.StatusOK,
+			MockResponse: `{
+				"id": "msg_999",
+				"type": "message",
+				"role": "assistant",
+				"model": "claude-3-7-sonnet-20250219",
+				"content": [
+					{
+						"type": "thinking",
+						"thinking": "Thinking only..."
+					}
+				],
+				"stop_reason": "end_turn"
+			}`,
+			ExpectedError: "no text content returned from Anthropic API",
+		},
 	}
 
 	for _, tc := range cases {
@@ -95,8 +155,9 @@ func TestAnthropicProvider_Fetch(t *testing.T) {
 			)
 
 			p := &AnthropicProvider{
-				Model:  "claude-3-5-sonnet-20241022",
-				Client: &client,
+				Model:           "claude-3-5-sonnet-20241022",
+				ReasoningEffort: "low",
+				Client:          &client,
 			}
 
 			resp, err := p.Fetch(t.Context(), tc.Input, tc.SystemPrompt)

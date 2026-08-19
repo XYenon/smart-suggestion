@@ -27,6 +27,19 @@ func TestNewAzureOpenAIProvider(t *testing.T) {
 	if p.DeploymentName != "test-deployment" {
 		t.Errorf("expected deployment name test-deployment, got %s", p.DeploymentName)
 	}
+
+	// With AZURE_OPENAI_REASONING_EFFORT
+	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
+		os.Setenv("AZURE_OPENAI_REASONING_EFFORT", effort)
+		p, err = NewAzureOpenAIProvider()
+		os.Unsetenv("AZURE_OPENAI_REASONING_EFFORT")
+		if err != nil {
+			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
+		}
+		if string(p.ReasoningEffort) != effort {
+			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
+		}
+	}
 }
 
 func TestNewAzureOpenAIProvider_Errors(t *testing.T) {
@@ -139,5 +152,42 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
 			}
 		})
+	}
+}
+
+func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"choices": [
+				{
+					"message": {
+						"role": "assistant",
+						"content": "=ls -la"
+					}
+				}
+			]
+		}`)
+	}))
+	defer server.Close()
+
+	client := openai.NewClient(
+		azure.WithEndpoint(server.URL, "2024-10-21"),
+		azure.WithAPIKey("test-key"),
+	)
+
+	p := &AzureOpenAIProvider{
+		DeploymentName:  "test-o3-mini",
+		ReasoningEffort: "high",
+		Client:          &client,
+	}
+
+	resp, err := p.Fetch(t.Context(), "list files", "system prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "=ls -la" {
+		t.Errorf("expected '=ls -la', got %q", resp)
 	}
 }

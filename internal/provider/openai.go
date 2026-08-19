@@ -8,6 +8,7 @@ import (
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
+	"github.com/openai/openai-go/shared"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
@@ -19,9 +20,10 @@ const (
 )
 
 type OpenAIProvider struct {
-	Model   string
-	APIType OpenAIAPIType
-	Client  *openai.Client
+	Model           string
+	APIType         OpenAIAPIType
+	ReasoningEffort shared.ReasoningEffort
+	Client          *openai.Client
 }
 
 func parseOpenAIAPIType(val string) (OpenAIAPIType, error) {
@@ -56,12 +58,15 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 		return nil, err
 	}
 
+	reasoningEffort := shared.ReasoningEffort(os.Getenv("OPENAI_REASONING_EFFORT"))
+
 	client := openai.NewClient(options...)
 
 	return &OpenAIProvider{
-		Model:   model,
-		APIType: apiType,
-		Client:  &client,
+		Model:           model,
+		APIType:         apiType,
+		ReasoningEffort: reasoningEffort,
+		Client:          &client,
 	}, nil
 }
 
@@ -85,13 +90,15 @@ func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, sys
 func (p *OpenAIProvider) fetchChatCompletions(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	messages := buildOpenAIChatMessages(systemPrompt, input, history)
 
-	resp, err := p.Client.Chat.Completions.New(
-		ctx,
-		openai.ChatCompletionNewParams{
-			Model:    openai.ChatModel(p.Model),
-			Messages: messages,
-		},
-	)
+	params := openai.ChatCompletionNewParams{
+		Model:    openai.ChatModel(p.Model),
+		Messages: messages,
+	}
+	if p.ReasoningEffort != "" {
+		params.ReasoningEffort = p.ReasoningEffort
+	}
+
+	resp, err := p.Client.Chat.Completions.New(ctx, params)
 	debug.Log("Received OpenAI response", map[string]any{
 		"response": resp,
 	})
@@ -117,6 +124,11 @@ func (p *OpenAIProvider) fetchResponses(ctx context.Context, input string, syste
 	}
 	if systemPrompt != "" {
 		params.Instructions = openai.String(systemPrompt)
+	}
+	if p.ReasoningEffort != "" {
+		params.Reasoning = shared.ReasoningParam{
+			Effort: p.ReasoningEffort,
+		}
 	}
 
 	resp, err := p.Client.Responses.New(ctx, params)

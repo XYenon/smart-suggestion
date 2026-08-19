@@ -70,6 +70,24 @@ func TestNewGeminiProvider_WithBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewGeminiProvider_WithThinkingConfig(t *testing.T) {
+	os.Setenv("GEMINI_API_KEY", "test-key")
+	defer os.Unsetenv("GEMINI_API_KEY")
+
+	// Thinking level tests
+	for _, level := range []string{"minimal", "low", "medium", "high", "custom_level", "LOW", "High"} {
+		os.Setenv("GEMINI_THINKING_LEVEL", level)
+		p, err := NewGeminiProvider(t.Context())
+		os.Unsetenv("GEMINI_THINKING_LEVEL")
+		if err != nil {
+			t.Fatalf("unexpected error for thinking level %s: %v", level, err)
+		}
+		if string(p.ThinkingLevel) != strings.ToUpper(level) {
+			t.Fatalf("expected ThinkingLevel to be %s, got %s", strings.ToUpper(level), p.ThinkingLevel)
+		}
+	}
+}
+
 func TestNewGeminiProvider_Errors(t *testing.T) {
 	os.Unsetenv("GEMINI_API_KEY")
 	_, err := NewGeminiProvider(t.Context())
@@ -170,6 +188,40 @@ func TestGeminiProvider_FetchWithHistory_MockedResponses(t *testing.T) {
 			}`,
 			statusCode:  200,
 			expectError: false,
+		},
+		{
+			name: "successful_response_with_thoughts",
+			responseBody: `{
+				"candidates": [
+					{
+						"content": {
+							"parts": [
+								{"thought": true, "text": "Thinking about listing files"},
+								{"text": "=ls -la"}
+							]
+						}
+					}
+				]
+			}`,
+			statusCode:  200,
+			expectError: false,
+		},
+		{
+			name: "only_thoughts_no_text",
+			responseBody: `{
+				"candidates": [
+					{
+						"content": {
+							"parts": [
+								{"thought": true, "text": "Thinking only"}
+							]
+						}
+					}
+				]
+			}`,
+			statusCode:    200,
+			expectError:   true,
+			errorContains: "unexpected part type",
 		},
 		{
 			name: "no_candidates",
@@ -373,5 +425,48 @@ func TestGeminiProvider_FetchWithHistory_Scenarios(t *testing.T) {
 				t.Errorf("unexpected error for %s: %v", tc.name, err)
 			}
 		})
+	}
+}
+
+func TestGeminiProvider_FetchWithThinkingConfig(t *testing.T) {
+	os.Setenv("GEMINI_API_KEY", "test-key")
+	defer os.Unsetenv("GEMINI_API_KEY")
+
+	successResponse := `{
+		"candidates": [
+			{
+				"content": {
+					"parts": [
+						{"thought": true, "text": "Thinking..."},
+						{"text": "=echo test"}
+					]
+				}
+			}
+		]
+	}`
+
+	ctx := t.Context()
+	mockClient := createMockHTTPClient(successResponse, 200)
+
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey:     "test-key",
+		HTTPClient: mockClient,
+	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	p := &GeminiProvider{
+		Model:         "gemini-2.5-flash",
+		ThinkingLevel: genai.ThinkingLevelHigh,
+		Client:        client,
+	}
+
+	resp, err := p.Fetch(ctx, "test", "system")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "=echo test" {
+		t.Errorf("expected '=echo test', got %q", resp)
 	}
 }

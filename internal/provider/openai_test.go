@@ -63,6 +63,19 @@ func TestNewOpenAIProvider(t *testing.T) {
 	if p.Model != "gpt-4o" {
 		t.Errorf("expected model gpt-4o, got %s", p.Model)
 	}
+
+	// With OPENAI_REASONING_EFFORT
+	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
+		os.Setenv("OPENAI_REASONING_EFFORT", effort)
+		p, err = NewOpenAIProvider()
+		os.Unsetenv("OPENAI_REASONING_EFFORT")
+		if err != nil {
+			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
+		}
+		if string(p.ReasoningEffort) != effort {
+			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
+		}
+	}
 }
 
 func TestNewOpenAIProvider_Errors(t *testing.T) {
@@ -414,4 +427,101 @@ func TestBuildOpenAIResponseInput(t *testing.T) {
 	if len(param) != 3 {
 		t.Fatalf("expected 3 items in param, got %d", len(param))
 	}
+}
+
+func TestOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
+	t.Run("chat_completions with reasoning effort", func(t *testing.T) {
+		var capturedBody string
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{
+				"id": "chatcmpl-123",
+				"object": "chat.completion",
+				"created": 1677652288,
+				"model": "o3-mini",
+				"choices": [
+					{
+						"index": 0,
+						"message": {
+							"role": "assistant",
+							"content": "=ls -la"
+						},
+						"finish_reason": "stop"
+					}
+				]
+			}`)
+		}))
+		defer server.Close()
+
+		client := openai.NewClient(
+			option.WithAPIKey("test-key"),
+			option.WithBaseURL(server.URL),
+		)
+
+		p := &OpenAIProvider{
+			Model:           "o3-mini",
+			APIType:         OpenAIAPITypeChatCompletions,
+			ReasoningEffort: "low",
+			Client:          &client,
+		}
+
+		resp, err := p.Fetch(t.Context(), "list files", "system prompt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp != "=ls -la" {
+			t.Errorf("expected '=ls -la', got %q", resp)
+		}
+		_ = capturedBody
+	})
+
+	t.Run("responses with reasoning effort", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprint(w, `{
+				"id": "resp_123",
+				"object": "response",
+				"created_at": 1740000000,
+				"status": "completed",
+				"model": "o3-mini",
+				"output": [
+					{
+						"id": "msg_123",
+						"type": "message",
+						"status": "completed",
+						"role": "assistant",
+						"content": [
+							{
+								"type": "output_text",
+								"text": "=ls -la"
+							}
+						]
+					}
+				]
+			}`)
+		}))
+		defer server.Close()
+
+		client := openai.NewClient(
+			option.WithAPIKey("test-key"),
+			option.WithBaseURL(server.URL),
+		)
+
+		p := &OpenAIProvider{
+			Model:           "o3-mini",
+			APIType:         OpenAIAPITypeResponses,
+			ReasoningEffort: "medium",
+			Client:          &client,
+		}
+
+		resp, err := p.Fetch(t.Context(), "list files", "system prompt")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp != "=ls -la" {
+			t.Errorf("expected '=ls -la', got %q", resp)
+		}
+	})
 }

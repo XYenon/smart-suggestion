@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -11,8 +12,9 @@ import (
 )
 
 type AnthropicProvider struct {
-	Model  string
-	Client *anthropic.Client
+	Model           string
+	ReasoningEffort string
+	Client          *anthropic.Client
 }
 
 func NewAnthropicProvider() (*AnthropicProvider, error) {
@@ -31,11 +33,14 @@ func NewAnthropicProvider() (*AnthropicProvider, error) {
 
 	model := envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-3-5-sonnet-20241022")
 
+	reasoningEffort := os.Getenv("ANTHROPIC_REASONING_EFFORT")
+
 	client := anthropic.NewClient(options...)
 
 	return &AnthropicProvider{
-		Model:  model,
-		Client: &client,
+		Model:           model,
+		ReasoningEffort: reasoningEffort,
+		Client:          &client,
 	}, nil
 }
 
@@ -58,15 +63,24 @@ func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, 
 
 	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(input)))
 
-	resp, err := p.Client.Messages.New(
-		ctx,
-		anthropic.MessageNewParams{
-			Model:     anthropic.Model(p.Model),
-			MaxTokens: 1000,
-			System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-			Messages:  messages,
-		},
-	)
+	maxTokens := int64(1000)
+	params := anthropic.MessageNewParams{
+		Model:    anthropic.Model(p.Model),
+		System:   []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Messages: messages,
+	}
+
+	if p.ReasoningEffort != "" {
+		params.Thinking = anthropic.ThinkingConfigParamUnion{
+			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
+		}
+		params.OutputConfig = anthropic.OutputConfigParam{
+			Effort: anthropic.OutputConfigEffort(p.ReasoningEffort),
+		}
+	}
+	params.MaxTokens = maxTokens
+
+	resp, err := p.Client.Messages.New(ctx, params)
 	debug.Log("Received Anthropic response", map[string]any{
 		"response": resp,
 	})
@@ -78,5 +92,16 @@ func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, 
 		return "", fmt.Errorf("no content returned from Anthropic API")
 	}
 
-	return resp.Content[0].Text, nil
+	var textBuilder strings.Builder
+	for _, block := range resp.Content {
+		if block.Type == "text" || block.Text != "" {
+			textBuilder.WriteString(block.Text)
+		}
+	}
+
+	if textBuilder.Len() == 0 {
+		return "", fmt.Errorf("no text content returned from Anthropic API")
+	}
+
+	return textBuilder.String(), nil
 }

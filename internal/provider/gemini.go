@@ -4,14 +4,16 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/xyenon/smart-suggestion/internal/debug"
 	"google.golang.org/genai"
 )
 
 type GeminiProvider struct {
-	Model  string
-	Client *genai.Client
+	Model         string
+	ThinkingLevel genai.ThinkingLevel
+	Client        *genai.Client
 }
 
 func NewGeminiProvider(ctx context.Context) (*GeminiProvider, error) {
@@ -34,9 +36,15 @@ func NewGeminiProvider(ctx context.Context) (*GeminiProvider, error) {
 
 	model := envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-2.5-flash")
 
+	var thinkingLevel genai.ThinkingLevel
+	if val := os.Getenv("GEMINI_THINKING_LEVEL"); val != "" {
+		thinkingLevel = genai.ThinkingLevel(strings.ToUpper(val))
+	}
+
 	return &GeminiProvider{
-		Model:  model,
-		Client: client,
+		Model:         model,
+		ThinkingLevel: thinkingLevel,
+		Client:        client,
 	}, nil
 }
 
@@ -48,6 +56,11 @@ func (p *GeminiProvider) FetchWithHistory(ctx context.Context, input string, sys
 	logProviderRequest("gemini", p.Model, systemPrompt, history, input)
 
 	config := &genai.GenerateContentConfig{SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser)}
+	if p.ThinkingLevel != "" {
+		config.ThinkingConfig = &genai.ThinkingConfig{
+			ThinkingLevel: p.ThinkingLevel,
+		}
+	}
 
 	var chatHistory []*genai.Content
 	for _, msg := range history {
@@ -83,9 +96,15 @@ func (p *GeminiProvider) FetchWithHistory(ctx context.Context, input string, sys
 		return "", fmt.Errorf("no content parts returned from Gemini API")
 	}
 
-	part := resp.Candidates[0].Content.Parts[0]
-	if part.Text != "" {
-		return part.Text, nil
+	var textBuilder strings.Builder
+	for _, part := range resp.Candidates[0].Content.Parts {
+		if !part.Thought && part.Text != "" {
+			textBuilder.WriteString(part.Text)
+		}
+	}
+
+	if textBuilder.Len() > 0 {
+		return textBuilder.String(), nil
 	}
 
 	return "", fmt.Errorf("unexpected part type from Gemini API")
