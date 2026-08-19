@@ -570,6 +570,12 @@ func TestBuildRootCmd(t *testing.T) {
 	if cmd.Use != "smart-suggestion" {
 		t.Fatalf("expected 'smart-suggestion', got %q", cmd.Use)
 	}
+	if !cmd.SilenceUsage {
+		t.Fatal("expected SilenceUsage to be true")
+	}
+	if !cmd.SilenceErrors {
+		t.Fatal("expected SilenceErrors to be true")
+	}
 
 	subcommands := cmd.Commands()
 	names := make(map[string]bool)
@@ -745,5 +751,43 @@ func TestRunSuggestWriteError(t *testing.T) {
 	err := runSuggest(cmd, nil)
 	if err == nil {
 		t.Fatal("expected error for write failure")
+	}
+}
+
+func TestMainSuccess(t *testing.T) {
+	oldArgs := os.Args
+	oldExit := exitFunc
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		exitFunc = oldExit
+	})
+
+	exitCalled := false
+	exitFunc = func(code int) {
+		exitCalled = true
+	}
+	os.Args = []string{"smart-suggestion", "version"}
+	main()
+	if exitCalled {
+		t.Fatal("expected main to not call exit on version command")
+	}
+}
+
+func TestMainError(t *testing.T) {
+	oldArgs := os.Args
+	oldExit := exitFunc
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		exitFunc = oldExit
+	})
+
+	exitCode := 0
+	exitFunc = func(code int) {
+		exitCode = code
+	}
+	os.Args = []string{"smart-suggestion", "--provider", "invalid_provider", "--input", "test"}
+	main()
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
 	}
 }

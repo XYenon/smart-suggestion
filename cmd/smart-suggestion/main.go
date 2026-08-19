@@ -277,9 +277,11 @@ func writeSuggestion(outputFile string, suggestion string) error {
 
 func buildRootCmd() *cobra.Command {
 	var rootCmd = &cobra.Command{
-		Use:   "smart-suggestion",
-		Short: "AI-powered smart suggestions for shell commands",
-		RunE:  runSuggest,
+		Use:           "smart-suggestion",
+		Short:         "AI-powered smart suggestions for shell commands",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runSuggest,
 	}
 
 	rootCmd.Flags().StringVarP(&providerName, "provider", "p", "", "AI provider (openai, azure_openai, anthropic, gemini)")
