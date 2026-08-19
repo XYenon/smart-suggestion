@@ -122,5 +122,6 @@ Key variables:
 - **Context Handling**: All code must accept context as a parameter and use `t.Context()` in tests.
 - **Markdown Tables**: All tables in README.md must be column-aligned.
 - **System Prompt**: The system prompt in `main.go` is critical. It defines the contract between the AI and the shell. Any changes to the AI logic must ensure this contract (`=`/`+` prefixes) is maintained.
+- **Strict Environment Variables**: Environment variable names and accepted values must be strict and exact. Do not introduce redundant fallback environment variable names (e.g. only use canonical env var names like `OPENAI_API_TYPE`) or loose/fuzzy value matching. Only accept explicitly documented valid values.
 - **Error Handling**: Errors in the binary are printed to stderr. The Zsh plugin captures stderr to show user-friendly messages.
 - **Dependencies**: Use `go mod` for dependency management.

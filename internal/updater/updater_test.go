@@ -828,3 +828,58 @@ func TestDownloadFile_StatusError(t *testing.T) {
 		t.Errorf("expected download failure error, got %v", err)
 	}
 }
+
+func TestSafeJoinPath_Invalid(t *testing.T) {
+	dest := t.TempDir()
+	_, err := safeJoinPath(dest, ".")
+	if err == nil {
+		t.Error("expected error for '.'")
+	}
+	_, err = safeJoinPath(dest, "/")
+	if err == nil {
+		t.Error("expected error for '/'")
+	}
+}
+
+func TestRollbackFromBackup_NotExist(t *testing.T) {
+	err := rollbackFromBackup("/nonexistent/file")
+	if err == nil {
+		t.Error("expected error for nonexistent file backup")
+	}
+}
+
+func TestReplaceWithBackup_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	target := filepath.Join(tempDir, "target.txt")
+	source := filepath.Join(tempDir, "source.txt")
+	os.WriteFile(target, []byte("target"), 0644)
+	os.WriteFile(source, []byte("source"), 0644)
+
+	cleanup, err := replaceWithBackup(target, source, 0644)
+	if err != nil {
+		t.Fatalf("replaceWithBackup failed: %v", err)
+	}
+	cleanup()
+
+	data, _ := os.ReadFile(target)
+	if string(data) != "source" {
+		t.Errorf("expected source, got %q", string(data))
+	}
+}
+
+func TestRollbackFromBackup_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	target := filepath.Join(tempDir, "file.txt")
+	backup := target + ".backup"
+	os.WriteFile(target, []byte("broken"), 0644)
+	os.WriteFile(backup, []byte("original"), 0644)
+
+	err := rollbackFromBackup(target)
+	if err != nil {
+		t.Fatalf("rollbackFromBackup failed: %v", err)
+	}
+	data, _ := os.ReadFile(target)
+	if string(data) != "original" {
+		t.Errorf("expected original, got %q", string(data))
+	}
+}
