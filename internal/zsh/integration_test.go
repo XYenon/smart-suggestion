@@ -356,6 +356,39 @@ func TestErrorHandling(t *testing.T) {
 	}
 }
 
+func TestErrorHandlingPreservesInput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	session, err := spawnZsh()
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	session.SetMockError("API_ERROR_500")
+
+	// Type something to test preservation of user input
+	session.pty.Write([]byte("echo my_original_input"))
+	time.Sleep(200 * time.Millisecond)
+
+	session.TriggerSuggest()
+
+	_, err = session.Expect("API_ERROR_500", 10*time.Second)
+	if err != nil {
+		t.Fatalf("Error message did not appear: %v. Output: %s", err, session.output.String())
+	}
+
+	// Press Enter to execute the preserved input on the new prompt
+	session.RunCommand("", 2*time.Second)
+
+	_, err = session.Expect("my_original_input", 2*time.Second)
+	if err != nil {
+		t.Fatalf("Original input was not preserved after error. Output: %s", session.output.String())
+	}
+}
+
 func TestTimeoutHandling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")

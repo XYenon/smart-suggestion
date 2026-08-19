@@ -262,12 +262,16 @@ function _do_smart_suggestion() {
 
     if [[ -z "$message" ]]; then
         _zsh_autosuggest_clear
-        local error_msg=$(cat "${SMART_SUGGESTION_CACHE_DIR}/error" 2>/dev/null || echo "No suggestion available at this time. Please try again later.")
+        local error_msg
+        if [[ -s "${SMART_SUGGESTION_CACHE_DIR}/error" ]]; then
+            error_msg=$(<"${SMART_SUGGESTION_CACHE_DIR}/error")
+        fi
+        if [[ -z "${error_msg//[[:space:]]/}" ]]; then
+            error_msg="No suggestion available at this time. Please try again later."
+        fi
 
-        # Use zle -M to display the error message properly
-        zle -M "$error_msg"
-
-        # The user's input remains in BUFFER and CURSOR automatically
+        zle -I
+        print -r -u2 -- "$error_msg"
         return 1
     fi
 
