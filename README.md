@@ -165,6 +165,7 @@ The recommended way to configure smart-suggestion is by creating a `config.zsh` 
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 OPENAI_API_KEY="your-openai-api-key"
+OPENAI_API_TYPE="responses" # Optional, "chat_completions" (default) or "responses"
 ```
 
 #### Azure OpenAI
@@ -242,6 +243,13 @@ GEMINI_MODEL="gemini-1.5-pro"  # Default: gemini-2.5-flash
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 SMART_SUGGESTION_HISTORY_LINES="20"  # Default: 10
+```
+
+#### OpenAI API Type
+
+```bash
+# ~/.config/smart-suggestion/config.zsh
+OPENAI_API_TYPE="responses"          # Default: chat_completions, options: chat_completions, responses
 ```
 
 ### View Current Configuration

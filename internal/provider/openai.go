@@ -7,12 +7,32 @@ import (
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/responses"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
+type OpenAIAPIType string
+
+const (
+	OpenAIAPITypeChatCompletions OpenAIAPIType = "chat_completions"
+	OpenAIAPITypeResponses       OpenAIAPIType = "responses"
+)
+
 type OpenAIProvider struct {
-	Model  string
-	Client *openai.Client
+	Model   string
+	APIType OpenAIAPIType
+	Client  *openai.Client
+}
+
+func parseOpenAIAPIType(val string) (OpenAIAPIType, error) {
+	switch val {
+	case "", "chat_completions":
+		return OpenAIAPITypeChatCompletions, nil
+	case "responses":
+		return OpenAIAPITypeResponses, nil
+	default:
+		return "", fmt.Errorf("unsupported OPENAI_API_TYPE: %s (valid: chat_completions, responses)", val)
+	}
 }
 
 func NewOpenAIProvider() (*OpenAIProvider, error) {
@@ -31,11 +51,17 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 
 	model := envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-4o-mini")
 
+	apiType, err := parseOpenAIAPIType(os.Getenv("OPENAI_API_TYPE"))
+	if err != nil {
+		return nil, err
+	}
+
 	client := openai.NewClient(options...)
 
 	return &OpenAIProvider{
-		Model:  model,
-		Client: &client,
+		Model:   model,
+		APIType: apiType,
+		Client:  &client,
 	}, nil
 }
 
@@ -46,6 +72,17 @@ func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt s
 func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	logProviderRequest("openai", p.Model, systemPrompt, history, input)
 
+	switch p.APIType {
+	case OpenAIAPITypeResponses:
+		return p.fetchResponses(ctx, input, systemPrompt, history)
+	case OpenAIAPITypeChatCompletions:
+		fallthrough
+	default:
+		return p.fetchChatCompletions(ctx, input, systemPrompt, history)
+	}
+}
+
+func (p *OpenAIProvider) fetchChatCompletions(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	messages := buildOpenAIChatMessages(systemPrompt, input, history)
 
 	resp, err := p.Client.Chat.Completions.New(
@@ -67,4 +104,37 @@ func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, sys
 	}
 
 	return resp.Choices[0].Message.Content, nil
+}
+
+func (p *OpenAIProvider) fetchResponses(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
+	inputItems := buildOpenAIResponseInput(input, history)
+
+	params := responses.ResponseNewParams{
+		Model: responses.ResponsesModel(p.Model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: inputItems,
+		},
+	}
+	if systemPrompt != "" {
+		params.Instructions = openai.String(systemPrompt)
+	}
+
+	resp, err := p.Client.Responses.New(ctx, params)
+	debug.Log("Received OpenAI response", map[string]any{
+		"response": resp,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create response: %w", err)
+	}
+
+	if len(resp.Output) == 0 {
+		return "", fmt.Errorf("no output returned from OpenAI API")
+	}
+
+	outputText := resp.OutputText()
+	if outputText == "" {
+		return "", fmt.Errorf("empty output text returned from OpenAI API")
+	}
+
+	return outputText, nil
 }

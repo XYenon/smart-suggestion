@@ -91,7 +91,7 @@ func TestRunSuggestMissingFlags(t *testing.T) {
 	dbg = false
 
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	err := runSuggest(cmd, nil)
 	if err == nil {
@@ -146,7 +146,7 @@ func TestGetExampleHistory(t *testing.T) {
 
 func TestSelectProvider(t *testing.T) {
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	originalProvider := providerName
 	t.Cleanup(func() { providerName = originalProvider })
@@ -646,7 +646,7 @@ func TestRunSuggestSuccess(t *testing.T) {
 	sendContext = false
 
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	if err := runSuggest(cmd, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -681,7 +681,7 @@ func TestRunSuggestProviderError(t *testing.T) {
 	dbg = false
 
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	err := runSuggest(cmd, nil)
 	if err == nil {
@@ -712,7 +712,7 @@ func TestRunSuggestFetchError(t *testing.T) {
 	sendContext = false
 
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	err := runSuggest(cmd, nil)
 	if err == nil {
@@ -746,7 +746,7 @@ func TestRunSuggestWriteError(t *testing.T) {
 	sendContext = false
 
 	cmd := &cobra.Command{}
-	cmd.SetContext(context.Background())
+	cmd.SetContext(t.Context())
 
 	err := runSuggest(cmd, nil)
 	if err == nil {
