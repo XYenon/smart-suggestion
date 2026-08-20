@@ -166,6 +166,7 @@ The recommended way to configure smart-suggestion is by creating a `config.zsh` 
 # ~/.config/smart-suggestion/config.zsh
 OPENAI_API_KEY="your-openai-api-key"
 OPENAI_API_TYPE="responses" # Optional, "chat_completions" (default) or "responses"
+OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high" (for reasoning models)
 ```
 
 #### Azure OpenAI
@@ -174,9 +175,10 @@ OPENAI_API_TYPE="responses" # Optional, "chat_completions" (default) or "respons
 # ~/.config/smart-suggestion/config.zsh
 AZURE_OPENAI_API_KEY="your-azure-openai-api-key" # i.e. c0123456789012345678901234567890
 AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp when your endpoint is https://awesome-corp.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-4o
-AZURE_OPENAI_API_VERSION="2024-10-21"  # Optional, defaults to 2024-10-21
+AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-5.6-terra
+AZURE_OPENAI_API_VERSION="2025-04-01-preview"  # Optional, defaults to 2025-04-01-preview
 AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
+AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
 ```
 
 #### Anthropic Claude
@@ -184,6 +186,7 @@ AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default t
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 ANTHROPIC_API_KEY="your-anthropic-api-key"
+ANTHROPIC_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
 ```
 
 #### Google Gemini
@@ -191,6 +194,7 @@ ANTHROPIC_API_KEY="your-anthropic-api-key"
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 GEMINI_API_KEY="your-gemini-api-key"
+GEMINI_THINKING_LEVEL="high" # Optional, "minimal", "low", "medium", or "high"
 ```
 
 ### Environment Variables
@@ -233,9 +237,26 @@ GEMINI_BASE_URL="your-custom-gemini-endpoint.com"
 
 ```bash
 # ~/.config/smart-suggestion/config.zsh
-OPENAI_MODEL="gpt-4o"          # Default: gpt-4o-mini
-ANTHROPIC_MODEL="claude-3-opus-20240229" # Default: claude-3-5-sonnet-20241022
-GEMINI_MODEL="gemini-1.5-pro"  # Default: gemini-2.5-flash
+OPENAI_MODEL="gpt-5.5"          # Default: gpt-5.6-terra
+ANTHROPIC_MODEL="claude-opus-5" # Default: claude-sonnet-5
+GEMINI_MODEL="gemini-3.1-pro-preview"  # Default: gemini-3.7-flash
+```
+
+#### Reasoning Effort / Thinking
+
+```bash
+# ~/.config/smart-suggestion/config.zsh
+# OpenAI
+OPENAI_REASONING_EFFORT="medium"        # Options: low, medium, high
+
+# Azure OpenAI
+AZURE_OPENAI_REASONING_EFFORT="medium"  # Options: low, medium, high
+
+# Anthropic Claude
+ANTHROPIC_REASONING_EFFORT="medium"     # Options: low, medium, high
+
+# Google Gemini
+GEMINI_THINKING_LEVEL="high"            # Options: minimal, low, medium, high
 ```
 
 #### History Lines for Context

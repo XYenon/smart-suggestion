@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +28,19 @@ func TestNewAzureOpenAIProvider(t *testing.T) {
 	}
 	if p.DeploymentName != "test-deployment" {
 		t.Errorf("expected deployment name test-deployment, got %s", p.DeploymentName)
+	}
+
+	// With AZURE_OPENAI_REASONING_EFFORT
+	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
+		os.Setenv("AZURE_OPENAI_REASONING_EFFORT", effort)
+		p, err = NewAzureOpenAIProvider()
+		os.Unsetenv("AZURE_OPENAI_REASONING_EFFORT")
+		if err != nil {
+			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
+		}
+		if string(p.ReasoningEffort) != effort {
+			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
+		}
 	}
 }
 
@@ -139,5 +154,98 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
 			}
 		})
+	}
+}
+
+func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"choices": [
+				{
+					"message": {
+						"role": "assistant",
+						"content": "=ls -la"
+					}
+				}
+			]
+		}`)
+	}))
+	defer server.Close()
+
+	client := openai.NewClient(
+		azure.WithEndpoint(server.URL, "2025-04-01-preview"),
+		azure.WithAPIKey("test-key"),
+	)
+
+	p := &AzureOpenAIProvider{
+		DeploymentName:  "test-o3-mini",
+		ReasoningEffort: "high",
+		Client:          &client,
+	}
+
+	resp, err := p.Fetch(t.Context(), "list files", "system prompt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp != "=ls -la" {
+		t.Errorf("expected '=ls -la', got %q", resp)
+	}
+}
+
+func TestAzureOpenAIProvider_Fetch_DefaultAPIVersionWithReasoningEffort(t *testing.T) {
+	var apiVersion string
+	var requestBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiVersion = r.URL.Query().Get("api-version")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed to read request body: %v", err)
+		}
+		if err := json.Unmarshal(body, &requestBody); err != nil {
+			t.Errorf("failed to unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `{
+			"choices": [
+				{
+					"message": {
+						"role": "assistant",
+						"content": "=ls -la"
+					}
+				}
+			]
+		}`)
+	}))
+	defer server.Close()
+
+	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
+	os.Setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "test-deployment")
+	os.Setenv("AZURE_OPENAI_BASE_URL", server.URL)
+	os.Setenv("AZURE_OPENAI_REASONING_EFFORT", "medium")
+	os.Unsetenv("AZURE_OPENAI_API_VERSION")
+	os.Unsetenv("AZURE_OPENAI_RESOURCE_NAME")
+	defer os.Unsetenv("AZURE_OPENAI_API_KEY")
+	defer os.Unsetenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+	defer os.Unsetenv("AZURE_OPENAI_BASE_URL")
+	defer os.Unsetenv("AZURE_OPENAI_REASONING_EFFORT")
+
+	// The default api-version must support reasoning_effort, otherwise Azure
+	// rejects the request with a 400 error.
+	p, err := NewAzureOpenAIProvider()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := p.Fetch(t.Context(), "list files", "system prompt"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if apiVersion != "2025-04-01-preview" {
+		t.Errorf("expected default api-version 2025-04-01-preview, got %s", apiVersion)
+	}
+	if requestBody["reasoning_effort"] != "medium" {
+		t.Errorf("expected reasoning_effort medium in request body, got %v", requestBody["reasoning_effort"])
 	}
 }
