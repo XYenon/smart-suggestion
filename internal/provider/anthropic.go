@@ -63,11 +63,13 @@ func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, 
 
 	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(input)))
 
-	maxTokens := int64(1000)
+	// MaxTokens caps thinking plus answer text, so leave room for reasoning
+	// when ANTHROPIC_REASONING_EFFORT is enabled.
 	params := anthropic.MessageNewParams{
-		Model:    anthropic.Model(p.Model),
-		System:   []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Messages: messages,
+		Model:     anthropic.Model(p.Model),
+		MaxTokens: 4096,
+		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
+		Messages:  messages,
 	}
 
 	if p.ReasoningEffort != "" {
@@ -78,7 +80,6 @@ func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, 
 			Effort: anthropic.OutputConfigEffort(p.ReasoningEffort),
 		}
 	}
-	params.MaxTokens = maxTokens
 
 	resp, err := p.Client.Messages.New(ctx, params)
 	debug.Log("Received Anthropic response", map[string]any{

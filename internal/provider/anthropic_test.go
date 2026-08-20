@@ -1,7 +1,9 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -178,6 +180,74 @@ func TestAnthropicProvider_Fetch(t *testing.T) {
 			got := ParseAndExtractCommand(resp)
 			if got != tc.ExpectedOutput {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
+			}
+		})
+	}
+}
+
+func TestAnthropicProvider_Fetch_MaxTokens(t *testing.T) {
+	// max_tokens caps thinking plus answer text, so it stays at 4096 whether
+	// or not reasoning effort is configured.
+	const expectedMaxTokens float64 = 4096
+
+	cases := []struct {
+		name            string
+		reasoningEffort string
+	}{
+		{name: "without reasoning effort", reasoningEffort: ""},
+		{name: "with reasoning effort", reasoningEffort: "high"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var requestBody map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("failed to read request body: %v", err)
+				}
+				if err := json.Unmarshal(body, &requestBody); err != nil {
+					t.Errorf("failed to unmarshal request body: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				fmt.Fprint(w, `{
+					"id": "msg_max_tokens",
+					"type": "message",
+					"role": "assistant",
+					"model": "claude-sonnet-5",
+					"content": [
+						{
+							"type": "text",
+							"text": "=ls"
+						}
+					],
+					"stop_reason": "end_turn"
+				}`)
+			}))
+			defer server.Close()
+
+			client := anthropic.NewClient(
+				option.WithAPIKey("test-key"),
+				option.WithBaseURL(server.URL),
+			)
+
+			p := &AnthropicProvider{
+				Model:           "claude-sonnet-5",
+				ReasoningEffort: tc.reasoningEffort,
+				Client:          &client,
+			}
+
+			if _, err := p.Fetch(t.Context(), "list files", "system prompt"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			maxTokens, ok := requestBody["max_tokens"].(float64)
+			if !ok {
+				t.Fatalf("expected max_tokens in request body, got %v", requestBody["max_tokens"])
+			}
+			if maxTokens != expectedMaxTokens {
+				t.Errorf("expected max_tokens %.0f, got %.0f", expectedMaxTokens, maxTokens)
 			}
 		})
 	}

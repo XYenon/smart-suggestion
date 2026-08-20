@@ -176,7 +176,7 @@ OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high" (for rea
 AZURE_OPENAI_API_KEY="your-azure-openai-api-key" # i.e. c0123456789012345678901234567890
 AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp when your endpoint is https://awesome-corp.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-5.6-terra
-AZURE_OPENAI_API_VERSION="2024-10-21"  # Optional, defaults to 2024-10-21
+AZURE_OPENAI_API_VERSION="2025-04-01-preview"  # Optional, defaults to 2025-04-01-preview
 AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
 AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
 ```

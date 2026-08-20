@@ -35,7 +35,9 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 		return nil, fmt.Errorf("AZURE_OPENAI_RESOURCE_NAME environment variable is not set")
 	}
 
-	apiVersion := envOrDefault(os.Getenv("AZURE_OPENAI_API_VERSION"), "2024-10-21")
+	// 2025-04-01-preview is the latest dated api-version and supports the
+	// reasoning_effort parameter for reasoning model deployments.
+	apiVersion := envOrDefault(os.Getenv("AZURE_OPENAI_API_VERSION"), "2025-04-01-preview")
 
 	reasoningEffort := shared.ReasoningEffort(os.Getenv("AZURE_OPENAI_REASONING_EFFORT"))
 
