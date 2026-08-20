@@ -34,7 +34,7 @@ func NewGeminiProvider(ctx context.Context) (*GeminiProvider, error) {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	model := envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-2.5-flash")
+	model := envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-3.7-flash")
 
 	var thinkingLevel genai.ThinkingLevel
 	if val := os.Getenv("GEMINI_THINKING_LEVEL"); val != "" {

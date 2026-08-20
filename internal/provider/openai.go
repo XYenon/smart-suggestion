@@ -51,7 +51,7 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 		options = append(options, option.WithBaseURL(baseURL))
 	}
 
-	model := envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-4o-mini")
+	model := envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-5.6-terra")
 
 	apiType, err := parseOpenAIAPIType(os.Getenv("OPENAI_API_TYPE"))
 	if err != nil {

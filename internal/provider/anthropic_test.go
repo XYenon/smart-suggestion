@@ -20,8 +20,8 @@ func TestNewAnthropicProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.Model != "claude-3-5-sonnet-20241022" {
-		t.Errorf("expected model claude-3-5-sonnet-20241022, got %s", p.Model)
+	if p.Model != "claude-sonnet-5" {
+		t.Errorf("expected model claude-sonnet-5, got %s", p.Model)
 	}
 	if p.ReasoningEffort != "" {
 		t.Errorf("expected default reasoning effort to be empty, got %s", p.ReasoningEffort)

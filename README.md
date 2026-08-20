@@ -175,7 +175,7 @@ OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high" (for rea
 # ~/.config/smart-suggestion/config.zsh
 AZURE_OPENAI_API_KEY="your-azure-openai-api-key" # i.e. c0123456789012345678901234567890
 AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp when your endpoint is https://awesome-corp.openai.azure.com
-AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-4o
+AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-5.6-terra
 AZURE_OPENAI_API_VERSION="2024-10-21"  # Optional, defaults to 2024-10-21
 AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
 AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
@@ -237,9 +237,9 @@ GEMINI_BASE_URL="your-custom-gemini-endpoint.com"
 
 ```bash
 # ~/.config/smart-suggestion/config.zsh
-OPENAI_MODEL="gpt-4o"          # Default: gpt-4o-mini
-ANTHROPIC_MODEL="claude-3-opus-20240229" # Default: claude-3-5-sonnet-20241022
-GEMINI_MODEL="gemini-1.5-pro"  # Default: gemini-2.5-flash
+OPENAI_MODEL="gpt-5.5"          # Default: gpt-5.6-terra
+ANTHROPIC_MODEL="claude-opus-5" # Default: claude-sonnet-5
+GEMINI_MODEL="gemini-3.1-pro-preview"  # Default: gemini-3.7-flash
 ```
 
 #### Reasoning Effort / Thinking

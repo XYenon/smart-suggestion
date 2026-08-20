@@ -18,8 +18,8 @@ func TestNewGeminiProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.Model != "gemini-2.5-flash" {
-		t.Errorf("expected default model gemini-2.5-flash, got %s", p.Model)
+	if p.Model != "gemini-3.7-flash" {
+		t.Errorf("expected default model gemini-3.7-flash, got %s", p.Model)
 	}
 }
 
@@ -63,8 +63,8 @@ func TestNewGeminiProvider_WithBaseURL(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if p.Model != "gemini-2.5-flash" {
-				t.Errorf("expected default model gemini-2.5-flash, got %s", p.Model)
+			if p.Model != "gemini-3.7-flash" {
+				t.Errorf("expected default model gemini-3.7-flash, got %s", p.Model)
 			}
 		})
 	}

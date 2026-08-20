@@ -31,7 +31,7 @@ func NewAnthropicProvider() (*AnthropicProvider, error) {
 		options = append(options, option.WithBaseURL(baseURL))
 	}
 
-	model := envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-3-5-sonnet-20241022")
+	model := envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-sonnet-5")
 
 	reasoningEffort := os.Getenv("ANTHROPIC_REASONING_EFFORT")
 

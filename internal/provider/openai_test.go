@@ -22,8 +22,8 @@ func TestNewOpenAIProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.Model != "gpt-4o-mini" {
-		t.Errorf("expected default model gpt-4o-mini, got %s", p.Model)
+	if p.Model != "gpt-5.6-terra" {
+		t.Errorf("expected default model gpt-5.6-terra, got %s", p.Model)
 	}
 	if p.APIType != OpenAIAPITypeChatCompletions {
 		t.Errorf("expected default api type chat_completions, got %s", p.APIType)
