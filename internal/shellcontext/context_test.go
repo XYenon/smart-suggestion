@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -430,12 +431,14 @@ func TestDoGetScrollbackHerdr(t *testing.T) {
 	oldKitty := os.Getenv("KITTY_LISTEN_ON")
 	oldHerdrEnv := os.Getenv("HERDR_ENV")
 	oldHerdrPane := os.Getenv("HERDR_PANE_ID")
+	oldHerdrBin := os.Getenv("HERDR_BIN_PATH")
 	oldExec := execCommand
 	t.Cleanup(func() {
 		os.Setenv("TMUX", oldTmux)
 		os.Setenv("KITTY_LISTEN_ON", oldKitty)
 		os.Setenv("HERDR_ENV", oldHerdrEnv)
 		os.Setenv("HERDR_PANE_ID", oldHerdrPane)
+		os.Setenv("HERDR_BIN_PATH", oldHerdrBin)
 		execCommand = oldExec
 	})
 
@@ -443,6 +446,7 @@ func TestDoGetScrollbackHerdr(t *testing.T) {
 	os.Setenv("KITTY_LISTEN_ON", "")
 	os.Setenv("HERDR_ENV", "1")
 	os.Setenv("HERDR_PANE_ID", "w1:p1")
+	os.Setenv("HERDR_BIN_PATH", "")
 
 	var gotArgs []string
 	execCommand = func(name string, args ...string) *exec.Cmd {
@@ -472,12 +476,14 @@ func TestDoGetScrollbackHerdrBeforeKitty(t *testing.T) {
 	oldKitty := os.Getenv("KITTY_LISTEN_ON")
 	oldHerdrEnv := os.Getenv("HERDR_ENV")
 	oldHerdrPane := os.Getenv("HERDR_PANE_ID")
+	oldHerdrBin := os.Getenv("HERDR_BIN_PATH")
 	oldExec := execCommand
 	t.Cleanup(func() {
 		os.Setenv("TMUX", oldTmux)
 		os.Setenv("KITTY_LISTEN_ON", oldKitty)
 		os.Setenv("HERDR_ENV", oldHerdrEnv)
 		os.Setenv("HERDR_PANE_ID", oldHerdrPane)
+		os.Setenv("HERDR_BIN_PATH", oldHerdrBin)
 		execCommand = oldExec
 	})
 
@@ -485,6 +491,7 @@ func TestDoGetScrollbackHerdrBeforeKitty(t *testing.T) {
 	os.Setenv("KITTY_LISTEN_ON", "unix:/tmp/kitty")
 	os.Setenv("HERDR_ENV", "1")
 	os.Setenv("HERDR_PANE_ID", "w1:p1")
+	os.Setenv("HERDR_BIN_PATH", "")
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		switch name {
 		case "herdr":
@@ -537,15 +544,18 @@ func TestGetHerdrScrollbackNotInSession(t *testing.T) {
 func TestGetHerdrScrollbackCommandError(t *testing.T) {
 	oldHerdrEnv := os.Getenv("HERDR_ENV")
 	oldHerdrPane := os.Getenv("HERDR_PANE_ID")
+	oldHerdrBin := os.Getenv("HERDR_BIN_PATH")
 	oldExec := execCommand
 	t.Cleanup(func() {
 		os.Setenv("HERDR_ENV", oldHerdrEnv)
 		os.Setenv("HERDR_PANE_ID", oldHerdrPane)
+		os.Setenv("HERDR_BIN_PATH", oldHerdrBin)
 		execCommand = oldExec
 	})
 
 	os.Setenv("HERDR_ENV", "1")
 	os.Setenv("HERDR_PANE_ID", "w1:p1")
+	os.Setenv("HERDR_BIN_PATH", "")
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		return exec.Command("false")
 	}
@@ -555,18 +565,55 @@ func TestGetHerdrScrollbackCommandError(t *testing.T) {
 	}
 }
 
-func TestGetHerdrScrollbackOmitsLinesWhenZero(t *testing.T) {
+func TestGetHerdrScrollbackUsesBinPath(t *testing.T) {
 	oldHerdrEnv := os.Getenv("HERDR_ENV")
 	oldHerdrPane := os.Getenv("HERDR_PANE_ID")
+	oldHerdrBin := os.Getenv("HERDR_BIN_PATH")
 	oldExec := execCommand
 	t.Cleanup(func() {
 		os.Setenv("HERDR_ENV", oldHerdrEnv)
 		os.Setenv("HERDR_PANE_ID", oldHerdrPane)
+		os.Setenv("HERDR_BIN_PATH", oldHerdrBin)
 		execCommand = oldExec
 	})
 
 	os.Setenv("HERDR_ENV", "1")
 	os.Setenv("HERDR_PANE_ID", "w1:p1")
+	os.Setenv("HERDR_BIN_PATH", "/custom/bin/herdr")
+
+	var gotName string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		gotName = name
+		return exec.Command("echo", "herdr scrollback")
+	}
+
+	content, err := getHerdrScrollback(10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if content != "herdr scrollback" {
+		t.Fatalf("expected herdr content, got %q", content)
+	}
+	if gotName != "/custom/bin/herdr" {
+		t.Fatalf("expected HERDR_BIN_PATH binary, got %q", gotName)
+	}
+}
+
+func TestGetHerdrScrollbackUnlimitedLines(t *testing.T) {
+	oldHerdrEnv := os.Getenv("HERDR_ENV")
+	oldHerdrPane := os.Getenv("HERDR_PANE_ID")
+	oldHerdrBin := os.Getenv("HERDR_BIN_PATH")
+	oldExec := execCommand
+	t.Cleanup(func() {
+		os.Setenv("HERDR_ENV", oldHerdrEnv)
+		os.Setenv("HERDR_PANE_ID", oldHerdrPane)
+		os.Setenv("HERDR_BIN_PATH", oldHerdrBin)
+		execCommand = oldExec
+	})
+
+	os.Setenv("HERDR_ENV", "1")
+	os.Setenv("HERDR_PANE_ID", "w1:p1")
+	os.Setenv("HERDR_BIN_PATH", "")
 
 	var gotArgs []string
 	execCommand = func(name string, args ...string) *exec.Cmd {
@@ -585,10 +632,9 @@ func TestGetHerdrScrollbackOmitsLinesWhenZero(t *testing.T) {
 		t.Fatalf("expected herdr content, got %q", content)
 	}
 
-	for _, arg := range gotArgs {
-		if arg == "--lines" {
-			t.Fatalf("did not expect --lines when scrollbackLines is 0, got %q", gotArgs)
-		}
+	wantArgs := []string{"herdr", "pane", "read", "w1:p1", "--source", "recent-unwrapped", "--lines", strconv.Itoa(herdrRecentLinesUnlimited)}
+	if strings.Join(gotArgs, " ") != strings.Join(wantArgs, " ") {
+		t.Fatalf("expected herdr args %q, got %q", wantArgs, gotArgs)
 	}
 }
 

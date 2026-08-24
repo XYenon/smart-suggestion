@@ -317,6 +317,18 @@ func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 	return strings.Join(lines, "\n"), nil
 }
 
+// herdrRecentLinesUnlimited is passed as --lines when scrollbackLines <= 0.
+// Herdr recent sources default to 80 rows if --lines is omitted, which would
+// not match the rest of smart-suggestion treating 0 as unlimited.
+const herdrRecentLinesUnlimited = 100000
+
+func herdrBinary() string {
+	if bin := os.Getenv("HERDR_BIN_PATH"); bin != "" {
+		return bin
+	}
+	return "herdr"
+}
+
 func getHerdrScrollback(scrollbackLines int) (string, error) {
 	if os.Getenv("HERDR_ENV") != "1" {
 		return "", fmt.Errorf("not in a herdr session")
@@ -327,11 +339,12 @@ func getHerdrScrollback(scrollbackLines int) (string, error) {
 		return "", fmt.Errorf("HERDR_PANE_ID is empty")
 	}
 
-	args := []string{"pane", "read", paneID, "--source", "recent-unwrapped"}
-	if scrollbackLines > 0 {
-		args = append(args, "--lines", strconv.Itoa(scrollbackLines))
+	lines := scrollbackLines
+	if lines <= 0 {
+		lines = herdrRecentLinesUnlimited
 	}
-	cmd := execCommand("herdr", args...)
+	args := []string{"pane", "read", paneID, "--source", "recent-unwrapped", "--lines", strconv.Itoa(lines)}
+	cmd := execCommand(herdrBinary(), args...)
 	output, err := cmd.Output()
 	if err != nil {
 		debug.Log("Failed to get herdr scrollback", map[string]any{"error": err.Error()})
