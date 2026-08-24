@@ -37,10 +37,11 @@ The project consists of three main components:
 To provide relevant suggestions, the tool gathers context from the user's shell environment. The **Scrollback** (what is currently visible on screen) is acquired using the following priority strategies:
 
 1.  **Tmux**: Checks for `TMUX` env var. Uses `tmux capture-pane -pS -`.
-2.  **Kitty**: Checks for `KITTY_LISTEN_ON` env var. Uses `kitten @ get-text --extent all`.
-3.  **Session Proxy Log**: If running in the tool's own proxy mode (with a session ID), reads from the session-specific log file.
-4.  **Default Proxy Log**: Reads from the global proxy log file.
-5.  **GNU Screen**: Checks for `STY` env var. Uses `screen -X hardcopy`.
+2.  **Herdr**: Checks for `HERDR_ENV=1`. Uses `herdr pane read $HERDR_PANE_ID --source recent-unwrapped`.
+3.  **Kitty**: Checks for `KITTY_LISTEN_ON` env var. Uses `kitten @ get-text --extent all`.
+4.  **Session Proxy Log**: If running in the tool's own proxy mode (with a session ID), reads from the session-specific log file.
+5.  **Default Proxy Log**: Reads from the global proxy log file.
+6.  **GNU Screen**: Checks for `STY` env var. Uses `screen -X hardcopy`.
 
 It also captures:
 - **Shell History**: Passed via environment variable `SMART_SUGGESTION_HISTORY`.

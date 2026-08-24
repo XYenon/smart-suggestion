@@ -325,6 +325,7 @@ Smart Suggestion automatically detects and uses native scrollback APIs for suppo
 | Terminal       | Detection                       | Method                         |
 |----------------|---------------------------------|--------------------------------|
 | **Tmux**       | `TMUX` env var                  | `tmux capture-pane`            |
+| **Herdr**      | `HERDR_ENV=1`                   | `herdr pane read`              |
 | **Kitty**      | `KITTY_LISTEN_ON` env var       | `kitten @ get-text`            |
 | **Ghostty**    | `GHOSTTY_RESOURCES_DIR` env var | `write_screen_file` keybind    |
 | **GNU Screen** | `STY` env var                   | `screen -X hardcopy`           |
