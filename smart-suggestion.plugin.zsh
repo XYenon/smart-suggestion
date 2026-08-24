@@ -367,7 +367,7 @@ function smart-suggestion() {
 zle -N _do_smart_suggestion
 bindkey "$SMART_SUGGESTION_KEY" _do_smart_suggestion
 
-if [[ -z "$SMART_SUGGESTION_PROXY_ACTIVE" && "$SMART_SUGGESTION_PROXY_MODE" == "true" && -z "$TMUX" && -z "$KITTY_LISTEN_ON" && -z "$GHOSTTY_RESOURCES_DIR" ]]; then
+if [[ -z "$SMART_SUGGESTION_PROXY_ACTIVE" && "$SMART_SUGGESTION_PROXY_MODE" == "true" && -z "$TMUX" && -z "$KITTY_LISTEN_ON" && -z "$GHOSTTY_RESOURCES_DIR" && "$HERDR_ENV" != "1" ]]; then
     _run_smart_suggestion_proxy
 fi
 

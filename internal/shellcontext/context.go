@@ -207,7 +207,13 @@ func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error)
 		debug.Log("Failed to get tmux scrollback", map[string]any{"error": err.Error()})
 	}
 
-	// 3. Kitty
+	// 3. Herdr
+	content, err := getHerdrScrollback(scrollbackLines)
+	if err == nil {
+		return content, nil
+	}
+
+	// 4. Kitty
 	if os.Getenv("KITTY_LISTEN_ON") != "" {
 		cmd := execCommand("kitten", "@", "get-text", "--extent", "all")
 		output, err := cmd.Output()
@@ -217,7 +223,7 @@ func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error)
 		debug.Log("Failed to get kitty scrollback", map[string]any{"error": err.Error()})
 	}
 
-	// 4. Session proxy log
+	// 5. Session proxy log
 	currentSessionID := session.GetCurrentSessionID()
 	if currentSessionID != "" {
 		sessionLogFile := session.GetSessionBasedLogFile(defaultProxyLogFile, currentSessionID)
@@ -232,8 +238,8 @@ func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error)
 		})
 	}
 
-	// 5. Default proxy log
-	content, err := readLatestProxyContent(defaultProxyLogFile, scrollbackLines)
+	// 6. Default proxy log
+	content, err = readLatestProxyContent(defaultProxyLogFile, scrollbackLines)
 	if err == nil {
 		return content, nil
 	}
@@ -242,19 +248,19 @@ func doGetScrollback(scrollbackLines int, scrollbackFile string) (string, error)
 		"file":  defaultProxyLogFile,
 	})
 
-	// 6. GNU Screen
+	// 7. GNU Screen
 	content, err = getScreenScrollback()
 	if err == nil {
 		return content, nil
 	}
 
-	// 7. tput fallback
+	// 8. tput fallback
 	content, err = getTerminalScrollbackWithTput()
 	if err == nil {
 		return content, nil
 	}
 
-	return "", fmt.Errorf("no scrollback available - not in tmux/screen session and no proxy log found")
+	return "", fmt.Errorf("no scrollback available - not in tmux/screen/herdr session and no proxy log found")
 }
 
 func readLatestLines(content string, maxLines int) (string, error) {
@@ -309,6 +315,30 @@ func readLatestProxyContent(logFile string, maxLines int) (string, error) {
 	}
 
 	return strings.Join(lines, "\n"), nil
+}
+
+func getHerdrScrollback(scrollbackLines int) (string, error) {
+	if os.Getenv("HERDR_ENV") != "1" {
+		return "", fmt.Errorf("not in a herdr session")
+	}
+
+	paneID := os.Getenv("HERDR_PANE_ID")
+	if paneID == "" {
+		return "", fmt.Errorf("HERDR_PANE_ID is empty")
+	}
+
+	args := []string{"pane", "read", paneID, "--source", "recent-unwrapped"}
+	if scrollbackLines > 0 {
+		args = append(args, "--lines", strconv.Itoa(scrollbackLines))
+	}
+	cmd := execCommand("herdr", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		debug.Log("Failed to get herdr scrollback", map[string]any{"error": err.Error()})
+		return "", fmt.Errorf("failed to capture herdr scrollback: %w", err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
 }
 
 func getScreenScrollback() (string, error) {
