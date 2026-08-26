@@ -6,45 +6,42 @@ import (
 	"os"
 	"strings"
 
+	anyllm "github.com/mozilla-ai/any-llm-go"
+	"github.com/mozilla-ai/any-llm-go/providers/gemini"
 	"github.com/xyenon/smart-suggestion/internal/debug"
-	"google.golang.org/genai"
 )
 
 type GeminiProvider struct {
+	Client        completionClient
 	Model         string
-	ThinkingLevel genai.ThinkingLevel
-	Client        *genai.Client
+	ThinkingLevel string
 }
 
-func NewGeminiProvider(ctx context.Context) (*GeminiProvider, error) {
+func NewGeminiProvider(_ context.Context) (*GeminiProvider, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 	}
 
-	config := &genai.ClientConfig{APIKey: apiKey}
-
-	baseURL := os.Getenv("GEMINI_BASE_URL")
-	if baseURL != "" {
-		config.HTTPOptions.BaseURL = baseURL
+	opts := []anyllm.Option{anyllm.WithAPIKey(apiKey)}
+	if baseURL := normalizeBaseURL(os.Getenv("GEMINI_BASE_URL")); baseURL != "" {
+		opts = append(opts, anyllm.WithBaseURL(baseURL))
 	}
 
-	client, err := genai.NewClient(ctx, config)
+	client, err := gemini.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	model := envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-3.7-flash")
-
-	var thinkingLevel genai.ThinkingLevel
+	var thinkingLevel string
 	if val := os.Getenv("GEMINI_THINKING_LEVEL"); val != "" {
-		thinkingLevel = genai.ThinkingLevel(strings.ToUpper(val))
+		thinkingLevel = strings.ToUpper(val)
 	}
 
 	return &GeminiProvider{
-		Model:         model,
-		ThinkingLevel: thinkingLevel,
 		Client:        client,
+		Model:         envOrDefault(os.Getenv("GEMINI_MODEL"), "gemini-3.7-flash"),
+		ThinkingLevel: thinkingLevel,
 	}, nil
 }
 
@@ -55,57 +52,28 @@ func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt s
 func (p *GeminiProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	logProviderRequest("gemini", p.Model, systemPrompt, history, input)
 
-	config := &genai.GenerateContentConfig{SystemInstruction: genai.NewContentFromText(systemPrompt, genai.RoleUser)}
+	params := anyllm.CompletionParams{
+		Model:    p.Model,
+		Messages: buildCompletionMessages(systemPrompt, input, history),
+	}
 	if p.ThinkingLevel != "" {
-		config.ThinkingConfig = &genai.ThinkingConfig{
-			ThinkingLevel: p.ThinkingLevel,
-		}
+		params.ReasoningEffort = reasoningEffort(strings.ToLower(p.ThinkingLevel))
 	}
 
-	var chatHistory []*genai.Content
-	for _, msg := range history {
-		var role genai.Role
-		switch msg.Role {
-		case "user":
-			role = genai.RoleUser
-		case "assistant":
-			role = genai.RoleModel
-		default:
-			continue // Skip unknown roles
-		}
-		chatHistory = append(chatHistory, genai.NewContentFromText(msg.Content, role))
-	}
-
-	chat, err := p.Client.Chats.Create(ctx, p.Model, config, chatHistory)
-	if err != nil {
-		return "", fmt.Errorf("failed to create chat: %w", err)
-	}
-
-	resp, err := chat.SendMessage(ctx, genai.Part{Text: input})
+	resp, err := p.Client.Completion(ctx, params)
 	debug.Log("Received Gemini response", map[string]any{
 		"response": resp,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to send message: %w", err)
 	}
-
-	if len(resp.Candidates) == 0 {
+	if resp == nil || len(resp.Choices) == 0 {
 		return "", fmt.Errorf("no candidates returned from Gemini API")
 	}
-	if resp.Candidates[0].Content == nil || len(resp.Candidates[0].Content.Parts) == 0 {
-		return "", fmt.Errorf("no content parts returned from Gemini API")
-	}
 
-	var textBuilder strings.Builder
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if !part.Thought && part.Text != "" {
-			textBuilder.WriteString(part.Text)
-		}
+	text := resp.Choices[0].Message.ContentString()
+	if text == "" {
+		return "", fmt.Errorf("unexpected part type from Gemini API")
 	}
-
-	if textBuilder.Len() > 0 {
-		return textBuilder.String(), nil
-	}
-
-	return "", fmt.Errorf("unexpected part type from Gemini API")
+	return text, nil
 }

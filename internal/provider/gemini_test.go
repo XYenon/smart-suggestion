@@ -1,13 +1,12 @@
 package provider
 
 import (
-	"io"
-	"net/http"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
 
-	"google.golang.org/genai"
+	anyllm "github.com/mozilla-ai/any-llm-go"
 )
 
 func TestNewGeminiProvider(t *testing.T) {
@@ -74,7 +73,6 @@ func TestNewGeminiProvider_WithThinkingConfig(t *testing.T) {
 	os.Setenv("GEMINI_API_KEY", "test-key")
 	defer os.Unsetenv("GEMINI_API_KEY")
 
-	// Thinking level tests
 	for _, level := range []string{"minimal", "low", "medium", "high", "custom_level", "LOW", "High"} {
 		os.Setenv("GEMINI_THINKING_LEVEL", level)
 		p, err := NewGeminiProvider(t.Context())
@@ -82,7 +80,7 @@ func TestNewGeminiProvider_WithThinkingConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for thinking level %s: %v", level, err)
 		}
-		if string(p.ThinkingLevel) != strings.ToUpper(level) {
+		if p.ThinkingLevel != strings.ToUpper(level) {
 			t.Fatalf("expected ThinkingLevel to be %s, got %s", strings.ToUpper(level), p.ThinkingLevel)
 		}
 	}
@@ -96,63 +94,14 @@ func TestNewGeminiProvider_Errors(t *testing.T) {
 	}
 }
 
-// Mock HTTP client for testing different response scenarios
-func createMockHTTPClient(responseBody string, statusCode int) *http.Client {
-	return &http.Client{
-		Transport: &mockTransport{
-			responseBody: responseBody,
-			statusCode:   statusCode,
-		},
-	}
-}
-
-type mockTransport struct {
-	responseBody string
-	statusCode   int
-}
-
-func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return &http.Response{
-		StatusCode: m.statusCode,
-		Body:       io.NopCloser(strings.NewReader(m.responseBody)),
-		Header:     make(http.Header),
-	}, nil
-}
-
-// Test Fetch method delegation
 func TestGeminiProvider_Fetch(t *testing.T) {
-	os.Setenv("GEMINI_API_KEY", "test-key")
-	defer os.Unsetenv("GEMINI_API_KEY")
-
-	successResponse := `{
-		"candidates": [
-			{
-				"content": {
-					"parts": [
-						{"text": "=ls"}
-					]
-				}
-			}
-		]
-	}`
-
-	ctx := t.Context()
-	mockClient := createMockHTTPClient(successResponse, 200)
-
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:     "test-key",
-		HTTPClient: mockClient,
-	})
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
-
+	fake := &fakeCompletionClient{response: completionFromContent("=ls")}
 	p := &GeminiProvider{
+		Client: fake,
 		Model:  "gemini-2.5-flash",
-		Client: client,
 	}
 
-	result, err := p.Fetch(ctx, "test input", "test prompt")
+	result, err := p.Fetch(t.Context(), "test input", "test prompt")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -161,130 +110,60 @@ func TestGeminiProvider_Fetch(t *testing.T) {
 	}
 }
 
-// Test with mocked HTTP responses to achieve comprehensive coverage
 func TestGeminiProvider_FetchWithHistory_MockedResponses(t *testing.T) {
-	os.Setenv("GEMINI_API_KEY", "test-key")
-	defer os.Unsetenv("GEMINI_API_KEY")
-
 	testCases := []struct {
 		name          string
-		responseBody  string
-		statusCode    int
+		response      *anyllm.ChatCompletion
+		err           error
 		expectError   bool
 		errorContains string
 	}{
 		{
-			name: "successful_response",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": {
-							"parts": [
-								{"text": "=ls -la"}
-							]
-						}
-					}
-				]
-			}`,
-			statusCode:  200,
+			name:        "successful_response",
+			response:    completionFromContent("=ls -la"),
 			expectError: false,
 		},
 		{
 			name: "successful_response_with_thoughts",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": {
-							"parts": [
-								{"thought": true, "text": "Thinking about listing files"},
-								{"text": "=ls -la"}
-							]
-						}
-					}
-				]
-			}`,
-			statusCode:  200,
+			response: &anyllm.ChatCompletion{
+				Choices: []anyllm.Choice{{
+					Message: anyllm.Message{
+						Role:      anyllm.RoleAssistant,
+						Content:   "=ls -la",
+						Reasoning: &anyllm.Reasoning{Content: "Thinking about listing files"},
+					},
+				}},
+			},
 			expectError: false,
 		},
 		{
 			name: "only_thoughts_no_text",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": {
-							"parts": [
-								{"thought": true, "text": "Thinking only"}
-							]
-						}
-					}
-				]
-			}`,
-			statusCode:    200,
+			response: &anyllm.ChatCompletion{
+				Choices: []anyllm.Choice{{
+					Message: anyllm.Message{
+						Role:      anyllm.RoleAssistant,
+						Reasoning: &anyllm.Reasoning{Content: "Thinking only"},
+					},
+				}},
+			},
 			expectError:   true,
 			errorContains: "unexpected part type",
 		},
 		{
-			name: "no_candidates",
-			responseBody: `{
-				"candidates": []
-			}`,
-			statusCode:    200,
+			name:          "no_candidates",
+			response:      &anyllm.ChatCompletion{},
 			expectError:   true,
 			errorContains: "no candidates returned",
 		},
 		{
-			name: "null_content",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": null
-					}
-				]
-			}`,
-			statusCode:    200,
-			expectError:   true,
-			errorContains: "no content parts returned",
-		},
-		{
-			name: "empty_parts",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": {
-							"parts": []
-						}
-					}
-				]
-			}`,
-			statusCode:    200,
-			expectError:   true,
-			errorContains: "no content parts returned",
-		},
-		{
-			name: "empty_text",
-			responseBody: `{
-				"candidates": [
-					{
-						"content": {
-							"parts": [
-								{"text": ""}
-							]
-						}
-					}
-				]
-			}`,
-			statusCode:    200,
+			name:          "empty_text",
+			response:      completionFromContent(""),
 			expectError:   true,
 			errorContains: "unexpected part type",
 		},
 		{
-			name: "api_error",
-			responseBody: `{
-				"error": {
-					"message": "API key not valid"
-				}
-			}`,
-			statusCode:    400,
+			name:          "api_error",
+			err:           fmt.Errorf("API key not valid"),
 			expectError:   true,
 			errorContains: "failed to send message",
 		},
@@ -292,82 +171,44 @@ func TestGeminiProvider_FetchWithHistory_MockedResponses(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := t.Context()
-			mockClient := createMockHTTPClient(tc.responseBody, tc.statusCode)
-
-			client, err := genai.NewClient(ctx, &genai.ClientConfig{
-				APIKey:     "test-key",
-				HTTPClient: mockClient,
-			})
-			if err != nil {
-				t.Fatalf("failed to create client: %v", err)
-			}
-
 			p := &GeminiProvider{
+				Client: &fakeCompletionClient{response: tc.response, err: tc.err},
 				Model:  "gemini-2.5-flash",
-				Client: client,
 			}
 
 			history := []Message{
 				{Role: "user", Content: "Hello"},
 				{Role: "assistant", Content: "Hi there!"},
 			}
-
-			result, err := p.FetchWithHistory(ctx, "test input", "test prompt", history)
-
+			result, err := p.FetchWithHistory(t.Context(), "test input", "test prompt", history)
 			if tc.expectError {
 				if err == nil {
 					t.Errorf("expected error but got none")
 				} else if tc.errorContains != "" && !strings.Contains(err.Error(), tc.errorContains) {
 					t.Errorf("expected error to contain %q, got %q", tc.errorContains, err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Errorf("unexpected error: %v", err)
-				}
-				if result == "" {
-					t.Error("expected non-empty result")
-				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if result == "" {
+				t.Error("expected non-empty result")
 			}
 		})
 	}
 }
 
-// Test system prompt and role filtering scenarios
 func TestGeminiProvider_FetchWithHistory_Scenarios(t *testing.T) {
-	os.Setenv("GEMINI_API_KEY", "test-key")
-	defer os.Unsetenv("GEMINI_API_KEY")
-
-	successResponse := `{
-		"candidates": [
-			{
-				"content": {
-					"parts": [
-						{"text": "=echo test"}
-					]
-				}
-			}
-		]
-	}`
-
+	success := completionFromContent("=echo test")
 	testCases := []struct {
 		name         string
 		input        string
 		systemPrompt string
 		history      []Message
 	}{
-		{
-			name:         "empty_system_prompt",
-			input:        "test",
-			systemPrompt: "",
-			history:      nil,
-		},
-		{
-			name:         "with_system_prompt",
-			input:        "test",
-			systemPrompt: "You are helpful",
-			history:      nil,
-		},
+		{name: "empty_system_prompt", input: "test", systemPrompt: "", history: nil},
+		{name: "with_system_prompt", input: "test", systemPrompt: "You are helpful", history: nil},
 		{
 			name:         "mixed_roles_filtering",
 			input:        "test",
@@ -404,24 +245,11 @@ func TestGeminiProvider_FetchWithHistory_Scenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := t.Context()
-			mockClient := createMockHTTPClient(successResponse, 200)
-
-			client, err := genai.NewClient(ctx, &genai.ClientConfig{
-				APIKey:     "test-key",
-				HTTPClient: mockClient,
-			})
-			if err != nil {
-				t.Fatalf("failed to create client: %v", err)
-			}
-
 			p := &GeminiProvider{
+				Client: &fakeCompletionClient{response: success},
 				Model:  "gemini-2.5-flash",
-				Client: client,
 			}
-
-			_, err = p.FetchWithHistory(ctx, tc.input, tc.systemPrompt, tc.history)
-			if err != nil {
+			if _, err := p.FetchWithHistory(t.Context(), tc.input, tc.systemPrompt, tc.history); err != nil {
 				t.Errorf("unexpected error for %s: %v", tc.name, err)
 			}
 		})
@@ -429,44 +257,31 @@ func TestGeminiProvider_FetchWithHistory_Scenarios(t *testing.T) {
 }
 
 func TestGeminiProvider_FetchWithThinkingConfig(t *testing.T) {
-	os.Setenv("GEMINI_API_KEY", "test-key")
-	defer os.Unsetenv("GEMINI_API_KEY")
-
-	successResponse := `{
-		"candidates": [
-			{
-				"content": {
-					"parts": [
-						{"thought": true, "text": "Thinking..."},
-						{"text": "=echo test"}
-					]
-				}
-			}
-		]
-	}`
-
-	ctx := t.Context()
-	mockClient := createMockHTTPClient(successResponse, 200)
-
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:     "test-key",
-		HTTPClient: mockClient,
-	})
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
+	fake := &fakeCompletionClient{
+		response: &anyllm.ChatCompletion{
+			Choices: []anyllm.Choice{{
+				Message: anyllm.Message{
+					Role:      anyllm.RoleAssistant,
+					Content:   "=echo test",
+					Reasoning: &anyllm.Reasoning{Content: "Thinking..."},
+				},
+			}},
+		},
 	}
-
 	p := &GeminiProvider{
+		Client:        fake,
 		Model:         "gemini-2.5-flash",
-		ThinkingLevel: genai.ThinkingLevelHigh,
-		Client:        client,
+		ThinkingLevel: "HIGH",
 	}
 
-	resp, err := p.Fetch(ctx, "test", "system")
+	resp, err := p.Fetch(t.Context(), "test", "system")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp != "=echo test" {
 		t.Errorf("expected '=echo test', got %q", resp)
+	}
+	if fake.last.ReasoningEffort != "high" {
+		t.Errorf("expected reasoning effort high, got %s", fake.last.ReasoningEffort)
 	}
 }

@@ -5,16 +5,15 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/azure"
-	"github.com/openai/openai-go/shared"
+	anyllm "github.com/mozilla-ai/any-llm-go"
+	"github.com/mozilla-ai/any-llm-go/providers/azureopenai"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
 type AzureOpenAIProvider struct {
+	Client          completionClient
 	DeploymentName  string
-	ReasoningEffort shared.ReasoningEffort
-	Client          *openai.Client
+	ReasoningEffort string
 }
 
 func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
@@ -30,7 +29,6 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 
 	baseURL := os.Getenv("AZURE_OPENAI_BASE_URL")
 	resourceName := os.Getenv("AZURE_OPENAI_RESOURCE_NAME")
-
 	if baseURL == "" && resourceName == "" {
 		return nil, fmt.Errorf("AZURE_OPENAI_RESOURCE_NAME environment variable is not set")
 	}
@@ -39,8 +37,6 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 	// reasoning_effort parameter for reasoning model deployments.
 	apiVersion := envOrDefault(os.Getenv("AZURE_OPENAI_API_VERSION"), "2025-04-01-preview")
 
-	reasoningEffort := shared.ReasoningEffort(os.Getenv("AZURE_OPENAI_REASONING_EFFORT"))
-
 	var endpoint string
 	if baseURL != "" {
 		endpoint = normalizeBaseURL(baseURL)
@@ -48,15 +44,19 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 		endpoint = fmt.Sprintf("https://%s.openai.azure.com", resourceName)
 	}
 
-	client := openai.NewClient(
-		azure.WithEndpoint(endpoint, apiVersion),
-		azure.WithAPIKey(apiKey),
+	client, err := azureopenai.New(
+		anyllm.WithAPIKey(apiKey),
+		anyllm.WithBaseURL(endpoint),
+		anyllm.WithExtra("api_version", apiVersion),
 	)
+	if err != nil {
+		return nil, err
+	}
 
 	return &AzureOpenAIProvider{
+		Client:          client,
 		DeploymentName:  deploymentName,
-		ReasoningEffort: reasoningEffort,
-		Client:          &client,
+		ReasoningEffort: os.Getenv("AZURE_OPENAI_REASONING_EFFORT"),
 	}, nil
 }
 
@@ -67,17 +67,15 @@ func (p *AzureOpenAIProvider) Fetch(ctx context.Context, input string, systemPro
 func (p *AzureOpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	logProviderRequest("azure_openai", p.DeploymentName, systemPrompt, history, input)
 
-	messages := buildOpenAIChatMessages(systemPrompt, input, history)
-
-	params := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(p.DeploymentName),
-		Messages: messages,
+	params := anyllm.CompletionParams{
+		Model:    p.DeploymentName,
+		Messages: buildCompletionMessages(systemPrompt, input, history),
 	}
 	if p.ReasoningEffort != "" {
-		params.ReasoningEffort = p.ReasoningEffort
+		params.ReasoningEffort = reasoningEffort(p.ReasoningEffort)
 	}
 
-	resp, err := p.Client.Chat.Completions.New(ctx, params)
+	resp, err := p.Client.Completion(ctx, params)
 	debug.Log("Received Azure OpenAI response", map[string]any{
 		"response": resp,
 	})
@@ -85,9 +83,5 @@ func (p *AzureOpenAIProvider) FetchWithHistory(ctx context.Context, input string
 		return "", fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices returned from Azure OpenAI API")
-	}
-
-	return resp.Choices[0].Message.Content, nil
+	return extractCompletionText(resp, fmt.Errorf("no choices returned from Azure OpenAI API"))
 }
