@@ -1,0 +1,45 @@
+{
+  "forkProcessing": "enabled",
+  "extends": [
+    "config:best-practices",
+    "group:allNonMajor",
+    "group:githubArtifactActions",
+    "group:linters",
+    "security:openssf-scorecard"
+  ],
+  "env": {
+    "GOPROXY": "https://golang.flatt.tech"
+  },
+  "gomod": {
+    "managerFilePatterns": ["/(^|/)go\\.mod$/"]
+  },
+  "packageRules": [
+    {
+      "matchPackageNames": ["*"],
+      "minimumReleaseAge": "3 days",
+      "internalChecksFilter": "strict"
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["digest"],
+      "matchDatasources": ["docker"],
+      "minimumReleaseAge": null,
+      "automerge": true
+    },
+    {
+      "matchDatasources": ["go"],
+      "matchRegistryUrls": ["https://golang.flatt.tech"],
+      "minimumReleaseAge": null
+    }
+  ],
+  "automergeType": "branch",
+  "postUpdateOptions": [
+    "gomodMassage",
+    "gomodTidy"
+  ],
+  "timezone": "Asia/Shanghai"
+}
