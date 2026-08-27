@@ -10,7 +10,7 @@ require (
 	golang.org/x/term v0.45.0
 )
 
-replace github.com/mozilla-ai/any-llm-go => github.com/IceCodeNew/any-llm-go v0.0.0-20260827040036-29125d07ce3d
+replace github.com/mozilla-ai/any-llm-go => github.com/IceCodeNew/any-llm-go v0.0.0-20260827120957-e40c17d80c67
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
