@@ -80,8 +80,8 @@ func TestNewGeminiProvider_WithThinkingConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for thinking level %s: %v", level, err)
 		}
-		if p.ThinkingLevel != strings.ToUpper(level) {
-			t.Fatalf("expected ThinkingLevel to be %s, got %s", strings.ToUpper(level), p.ThinkingLevel)
+		if p.ThinkingLevel != strings.ToLower(level) {
+			t.Fatalf("expected ThinkingLevel to be %s, got %s", strings.ToLower(level), p.ThinkingLevel)
 		}
 	}
 }
@@ -271,7 +271,7 @@ func TestGeminiProvider_FetchWithThinkingConfig(t *testing.T) {
 	p := &GeminiProvider{
 		Client:        fake,
 		Model:         "gemini-2.5-flash",
-		ThinkingLevel: "HIGH",
+		ThinkingLevel: "high",
 	}
 
 	resp, err := p.Fetch(t.Context(), "test", "system")

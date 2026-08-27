@@ -34,7 +34,7 @@ func NewGeminiProvider(_ context.Context) (*GeminiProvider, error) {
 
 	var thinkingLevel string
 	if val := os.Getenv("GEMINI_THINKING_LEVEL"); val != "" {
-		thinkingLevel = strings.ToUpper(val)
+		thinkingLevel = strings.ToLower(val)
 	}
 
 	return &GeminiProvider{
@@ -54,17 +54,12 @@ func (p *GeminiProvider) FetchWithHistory(
 	systemPrompt string,
 	history []Message,
 ) (string, error) {
-	effort := ""
-	if p.ThinkingLevel != "" {
-		effort = strings.ToLower(p.ThinkingLevel)
-	}
-
 	return fetchChat(ctx, chatFetch{
 		client: p.Client,
 		empty:  errNoGeminiOutput,
 		fail:   "failed to send message",
 		model:  p.Model,
 		name:   "gemini",
-		effort: effort,
+		effort: p.ThinkingLevel,
 	}, input, systemPrompt, history)
 }
