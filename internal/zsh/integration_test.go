@@ -18,7 +18,7 @@ func requireZsh(t *testing.T) {
 	t.Helper()
 
 	if _, err := exec.LookPath("zsh"); err != nil {
-		t.Skip("zsh not found in PATH")
+		t.Fatalf("zsh is required for plugin tests: %v", err)
 	}
 }
 
