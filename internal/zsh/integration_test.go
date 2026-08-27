@@ -14,6 +14,14 @@ import (
 	"github.com/creack/pty"
 )
 
+func requireZsh(t *testing.T) {
+	t.Helper()
+
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skip("zsh not found in PATH")
+	}
+}
+
 type zshSession struct {
 	pty    *os.File
 	cmd    *exec.Cmd
@@ -254,6 +262,7 @@ func TestAppendSuggestion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -303,6 +312,7 @@ func TestReplaceSuggestion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -339,6 +349,7 @@ func TestErrorHandling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -360,6 +371,7 @@ func TestErrorHandlingPreservesInput(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -393,6 +405,7 @@ func TestTimeoutHandling(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -415,6 +428,7 @@ func TestConfigurationSync(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	requireZsh(t)
 
 	session, err := spawnZsh()
 	if err != nil {
@@ -471,6 +485,8 @@ SMART_SUGGESTION_DEBUG="true"
 }
 
 func TestPluginRegistration(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)
@@ -535,6 +551,8 @@ bindkey "^o" | grep -q "_do_smart_suggestion" && echo "KEYBIND_REGISTERED" || ec
 }
 
 func TestPluginSourcing(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)
@@ -593,6 +611,8 @@ fi
 }
 
 func TestProxyNotStartedWithoutTTY(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)
@@ -646,6 +666,8 @@ func TestProxyNotStartedWithoutTTY(t *testing.T) {
 }
 
 func TestProxyStartedWithTTY(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)
@@ -723,6 +745,8 @@ func TestProxyStartedWithTTY(t *testing.T) {
 }
 
 func TestProxyNotStartedInHerdr(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)
@@ -804,6 +828,8 @@ func TestProxyNotStartedInHerdr(t *testing.T) {
 }
 
 func TestProxyStartedInHerdrWithoutPaneID(t *testing.T) {
+	requireZsh(t)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get wd: %v", err)

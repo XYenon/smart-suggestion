@@ -22,5 +22,8 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Test
         run: go test ./...
