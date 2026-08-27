@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	"compress/gzip"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -143,5 +145,94 @@ func TestLogRotator_Compression(t *testing.T) {
 		t.Errorf("expected 1 backup, got %d", len(backups))
 	} else if filepath.Ext(backups[0]) != ".gz" {
 		t.Errorf("expected backup to have .gz extension, got %s", filepath.Ext(backups[0]))
+	}
+}
+
+func TestLogRotator_SameSecondBackupNames(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+
+	config := &LogRotateConfig{
+		MaxSize:    1,
+		MaxBackups: 5,
+		MaxAge:     1,
+		Compress:   false,
+	}
+	lr := NewLogRotator(config)
+
+	for i := range 3 {
+		if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+			t.Fatalf("write %d: %v", i, err)
+		}
+		if err := lr.CheckAndRotate(logFile); err != nil {
+			t.Fatalf("rotation %d: %v", i, err)
+		}
+	}
+
+	backups, err := lr.GetBackupFiles(logFile)
+	if err != nil {
+		t.Fatalf("GetBackupFiles: %v", err)
+	}
+	if len(backups) != 3 {
+		t.Fatalf("expected 3 backups, got %d (%v)", len(backups), backups)
+	}
+}
+
+func TestLogRotator_BackupGlobIgnoresUnrelatedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	unrelated := filepath.Join(tempDir, "test-notes.txt")
+	if err := os.WriteFile(unrelated, []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	config := &LogRotateConfig{
+		MaxSize:    1,
+		MaxBackups: 1,
+		MaxAge:     1,
+		Compress:   false,
+	}
+	lr := NewLogRotator(config)
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lr.CheckAndRotate(logFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated file was removed: %v", err)
+	}
+}
+
+func TestCompressFileClosesGzipWriter(t *testing.T) {
+	tempDir := t.TempDir()
+	src := filepath.Join(tempDir, "src.log")
+	dst := filepath.Join(tempDir, "src.log.gz")
+	if err := os.WriteFile(src, []byte("compress me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := NewLogRotator(nil)
+	if err := lr.compressFile(src, dst); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip footer missing: %v", err)
+	}
+	defer gr.Close()
+	got, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "compress me" {
+		t.Fatalf("got %q", got)
 	}
 }

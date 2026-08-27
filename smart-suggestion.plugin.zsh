@@ -232,8 +232,13 @@ function _do_smart_suggestion() {
     _zsh_autosuggest_clear
 
     ##### Fetch message
-    exec {OUTPUT_FD}< <(_fetch_suggestions "$scrollback_file" & echo $!)
-    read pid <&$OUTPUT_FD
+    local fifo="${SMART_SUGGESTION_CACHE_DIR}/suggest.fifo"
+    rm -f "$fifo"
+    mkfifo "$fifo" || return 1
+    _fetch_suggestions "$scrollback_file" > "$fifo" &
+    local pid=$!
+    exec {OUTPUT_FD}< "$fifo"
+    rm -f "$fifo"
 
     _show_loading_animation $pid
     local response_code=$?
@@ -252,6 +257,7 @@ function _do_smart_suggestion() {
     fi
 
     if [[ -f "${SMART_SUGGESTION_CACHE_DIR}/canceled" ]]; then
+        exec {OUTPUT_FD}<&-
         _zsh_autosuggest_clear
         return 1
     fi

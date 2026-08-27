@@ -127,7 +127,7 @@ func spawnZshWithProvider(provider string) (*zshSession, error) {
 	}
 
 	autosuggestDir := filepath.Join(tmpDir, "zsh-autosuggestions")
-	cloneCmd := exec.Command("git", "clone", "--depth", "1", "https://github.com/zsh-users/zsh-autosuggestions", autosuggestDir)
+	cloneCmd := exec.Command("git", "clone", "--depth", "1", "--branch", "v0.7.1", "https://github.com/zsh-users/zsh-autosuggestions", autosuggestDir)
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to clone zsh-autosuggestions: %v, output: %s", err, string(out))

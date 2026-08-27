@@ -102,3 +102,38 @@ func TestInitError(t *testing.T) {
 		t.Error("expected debug to be disabled after init error")
 	}
 }
+
+func TestLogFilePermissions(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", tempDir)
+
+	mu.Lock()
+	enabled = false
+	logFile = nil
+	logger = nil
+	initOnce = *new(sync.Once)
+	initError = nil
+	mu.Unlock()
+
+	Enable(true)
+	Log("perm check", nil)
+	t.Cleanup(Close)
+
+	dir := filepath.Join(tempDir, "smart-suggestion")
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("dir perm %o", info.Mode().Perm())
+	}
+
+	logPath := filepath.Join(dir, "debug.log")
+	info, err = os.Stat(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("file perm %o", info.Mode().Perm())
+	}
+}

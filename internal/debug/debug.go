@@ -38,12 +38,12 @@ func Enabled() bool {
 
 func initLogger() {
 	logFilePath := filepath.Join(paths.GetCacheDir(), "debug.log")
-	if err := os.MkdirAll(filepath.Dir(logFilePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(logFilePath), 0700); err != nil {
 		initError = fmt.Errorf("failed to create cache directory: %w", err)
 		return
 	}
 
-	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
 		initError = fmt.Errorf("failed to open debug log file: %w", err)
 		return
