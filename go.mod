@@ -10,7 +10,7 @@ require (
 	golang.org/x/term v0.45.0
 )
 
-replace github.com/mozilla-ai/any-llm-go => github.com/IceCodeNew/any-llm-go v0.0.0-20260826200249-e72af2666e90
+replace github.com/mozilla-ai/any-llm-go => github.com/IceCodeNew/any-llm-go v0.0.0-20260827040036-29125d07ce3d
 
 require (
 	cloud.google.com/go v0.116.0 // indirect
@@ -32,7 +32,6 @@ require (
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/openai/openai-go v1.12.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
@@ -41,7 +40,6 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
 	go.opentelemetry.io/otel v1.43.0 // indirect
@@ -57,5 +55,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260414002931-afd174a4e478 // indirect
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -39,7 +39,7 @@ func parseOpenAIAPIType(val string) (OpenAIAPIType, error) {
 func NewOpenAIProvider() (*OpenAIProvider, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+		return nil, errMissingOpenAIAPIKey
 	}
 
 	opts := []anyllm.Option{anyllm.WithAPIKey(apiKey)}
@@ -49,7 +49,7 @@ func NewOpenAIProvider() (*OpenAIProvider, error) {
 
 	client, err := openai.New(opts...)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating OpenAI client: %w", err)
 	}
 
 	apiType, err := parseOpenAIAPIType(os.Getenv("OPENAI_API_TYPE"))
@@ -70,40 +70,43 @@ func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt s
 	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
 }
 
-func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
+func (p *OpenAIProvider) FetchWithHistory(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	if p.APIType == OpenAIAPITypeResponses {
+		return p.fetchResponses(ctx, input, systemPrompt, history)
+	}
+
+	return p.fetchChatCompletions(ctx, input, systemPrompt, history)
+}
+
+func (p *OpenAIProvider) fetchChatCompletions(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	return fetchChat(ctx, chatFetch{
+		client: p.Client,
+		empty:  errNoOpenAIChoices,
+		fail:   failCreateChatCompletion,
+		model:  p.Model,
+		name:   "openai",
+		effort: p.ReasoningEffort,
+	}, input, systemPrompt, history)
+}
+
+func (p *OpenAIProvider) fetchResponses(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
 	logProviderRequest("openai", p.Model, systemPrompt, history, input)
 
-	switch p.APIType {
-	case OpenAIAPITypeResponses:
-		return p.fetchResponses(ctx, input, systemPrompt, history)
-	case OpenAIAPITypeChatCompletions:
-		fallthrough
-	default:
-		return p.fetchChatCompletions(ctx, input, systemPrompt, history)
-	}
-}
-
-func (p *OpenAIProvider) fetchChatCompletions(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	params := anyllm.CompletionParams{
-		Model:    p.Model,
-		Messages: buildCompletionMessages(systemPrompt, input, history),
-	}
-	if p.ReasoningEffort != "" {
-		params.ReasoningEffort = reasoningEffort(p.ReasoningEffort)
-	}
-
-	resp, err := p.Client.Completion(ctx, params)
-	debug.Log("Received OpenAI response", map[string]any{
-		"response": resp,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
-	return extractCompletionText(resp, fmt.Errorf("no choices returned from OpenAI API"))
-}
-
-func (p *OpenAIProvider) fetchResponses(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
 	params := anyllm.ResponsesParams{
 		Input:        buildResponsesInput(input, history),
 		Instructions: systemPrompt,
@@ -114,18 +117,20 @@ func (p *OpenAIProvider) fetchResponses(ctx context.Context, input string, syste
 	}
 
 	resp, err := p.ResponsesClient.Responses(ctx, params)
-	debug.Log("Received OpenAI response", map[string]any{
+	debug.Log("Received openai response", map[string]any{
 		"response": resp,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create response: %w", err)
 	}
 	if resp == nil || resp.Output == "" {
-		if resp != nil && resp.ID != "" && resp.Output == "" {
-			return "", fmt.Errorf("empty output text returned from OpenAI API")
+		if resp != nil && resp.ID != "" {
+			return "", errEmptyOpenAIOutput
 		}
-		return "", fmt.Errorf("no output returned from OpenAI API")
+
+		return "", errNoOpenAIOutput
 	}
+
 	return resp.Output, nil
 }
 
@@ -133,12 +138,13 @@ func buildResponsesInput(input string, history []Message) []anyllm.ResponsesInpu
 	items := make([]anyllm.ResponsesInputItem, 0, len(history)+1)
 	for _, msg := range history {
 		switch msg.Role {
-		case "user":
+		case roleUser:
 			items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleUser, Content: msg.Content})
-		case "assistant":
+		case roleAssistant:
 			items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleAssistant, Content: msg.Content})
 		}
 	}
 	items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleUser, Content: input})
+
 	return items
 }

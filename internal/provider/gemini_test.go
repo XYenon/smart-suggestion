@@ -147,7 +147,7 @@ func TestGeminiProvider_FetchWithHistory_MockedResponses(t *testing.T) {
 				}},
 			},
 			expectError:   true,
-			errorContains: "unexpected part type",
+			errorContains: "no candidates returned",
 		},
 		{
 			name:          "no_candidates",
@@ -159,7 +159,7 @@ func TestGeminiProvider_FetchWithHistory_MockedResponses(t *testing.T) {
 			name:          "empty_text",
 			response:      completionFromContent(""),
 			expectError:   true,
-			errorContains: "unexpected part type",
+			errorContains: "no candidates returned",
 		},
 		{
 			name:          "api_error",

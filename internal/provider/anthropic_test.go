@@ -75,7 +75,7 @@ func TestAnthropicProvider_Fetch(t *testing.T) {
 			Name:          "thinking block only (no text content)",
 			Input:         "test",
 			SystemPrompt:  "test",
-			ExpectedError: "no text content returned from Anthropic API",
+			ExpectedError: "no content returned from Anthropic API",
 		},
 	}
 

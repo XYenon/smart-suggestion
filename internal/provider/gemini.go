@@ -8,7 +8,6 @@ import (
 
 	anyllm "github.com/mozilla-ai/any-llm-go"
 	"github.com/mozilla-ai/any-llm-go/providers/gemini"
-	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
 type GeminiProvider struct {
@@ -20,7 +19,7 @@ type GeminiProvider struct {
 func NewGeminiProvider(_ context.Context) (*GeminiProvider, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
+		return nil, errMissingGeminiAPIKey
 	}
 
 	opts := []anyllm.Option{anyllm.WithAPIKey(apiKey)}
@@ -49,31 +48,23 @@ func (p *GeminiProvider) Fetch(ctx context.Context, input string, systemPrompt s
 	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
 }
 
-func (p *GeminiProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	logProviderRequest("gemini", p.Model, systemPrompt, history, input)
-
-	params := anyllm.CompletionParams{
-		Model:    p.Model,
-		Messages: buildCompletionMessages(systemPrompt, input, history),
-	}
+func (p *GeminiProvider) FetchWithHistory(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	effort := ""
 	if p.ThinkingLevel != "" {
-		params.ReasoningEffort = reasoningEffort(strings.ToLower(p.ThinkingLevel))
+		effort = strings.ToLower(p.ThinkingLevel)
 	}
 
-	resp, err := p.Client.Completion(ctx, params)
-	debug.Log("Received Gemini response", map[string]any{
-		"response": resp,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to send message: %w", err)
-	}
-	if resp == nil || len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no candidates returned from Gemini API")
-	}
-
-	text := resp.Choices[0].Message.ContentString()
-	if text == "" {
-		return "", fmt.Errorf("unexpected part type from Gemini API")
-	}
-	return text, nil
+	return fetchChat(ctx, chatFetch{
+		client: p.Client,
+		empty:  errNoGeminiOutput,
+		fail:   "failed to send message",
+		model:  p.Model,
+		name:   "gemini",
+		effort: effort,
+	}, input, systemPrompt, history)
 }

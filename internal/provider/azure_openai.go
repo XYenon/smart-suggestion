@@ -7,7 +7,6 @@ import (
 
 	anyllm "github.com/mozilla-ai/any-llm-go"
 	"github.com/mozilla-ai/any-llm-go/providers/azureopenai"
-	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
 type AzureOpenAIProvider struct {
@@ -19,18 +18,18 @@ type AzureOpenAIProvider struct {
 func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 	apiKey := os.Getenv("AZURE_OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("AZURE_OPENAI_API_KEY environment variable is not set")
+		return nil, errMissingAzureAPIKey
 	}
 
 	deploymentName := os.Getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
 	if deploymentName == "" {
-		return nil, fmt.Errorf("AZURE_OPENAI_DEPLOYMENT_NAME environment variable is not set")
+		return nil, errMissingAzureDeployment
 	}
 
 	baseURL := os.Getenv("AZURE_OPENAI_BASE_URL")
 	resourceName := os.Getenv("AZURE_OPENAI_RESOURCE_NAME")
 	if baseURL == "" && resourceName == "" {
-		return nil, fmt.Errorf("AZURE_OPENAI_RESOURCE_NAME environment variable is not set")
+		return nil, errMissingAzureResource
 	}
 
 	// 2025-04-01-preview is the latest dated api-version and supports the
@@ -50,7 +49,7 @@ func NewAzureOpenAIProvider() (*AzureOpenAIProvider, error) {
 		anyllm.WithExtra("api_version", apiVersion),
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating Azure OpenAI client: %w", err)
 	}
 
 	return &AzureOpenAIProvider{
@@ -64,24 +63,18 @@ func (p *AzureOpenAIProvider) Fetch(ctx context.Context, input string, systemPro
 	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
 }
 
-func (p *AzureOpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	logProviderRequest("azure_openai", p.DeploymentName, systemPrompt, history, input)
-
-	params := anyllm.CompletionParams{
-		Model:    p.DeploymentName,
-		Messages: buildCompletionMessages(systemPrompt, input, history),
-	}
-	if p.ReasoningEffort != "" {
-		params.ReasoningEffort = reasoningEffort(p.ReasoningEffort)
-	}
-
-	resp, err := p.Client.Completion(ctx, params)
-	debug.Log("Received Azure OpenAI response", map[string]any{
-		"response": resp,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
-	return extractCompletionText(resp, fmt.Errorf("no choices returned from Azure OpenAI API"))
+func (p *AzureOpenAIProvider) FetchWithHistory(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	return fetchChat(ctx, chatFetch{
+		client: p.Client,
+		empty:  errNoAzureChoices,
+		fail:   failCreateChatCompletion,
+		model:  p.DeploymentName,
+		name:   "azure_openai",
+		effort: p.ReasoningEffort,
+	}, input, systemPrompt, history)
 }
