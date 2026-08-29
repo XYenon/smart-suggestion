@@ -103,6 +103,10 @@ func spawnZsh() (*zshSession, error) {
 }
 
 func spawnZshWithProvider(provider string) (*zshSession, error) {
+	return spawnZshWithProviderAndCache(provider, "")
+}
+
+func spawnZshWithProviderAndCache(provider, cacheHome string) (*zshSession, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -117,9 +121,13 @@ func spawnZshWithProvider(provider string) (*zshSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cacheHome == "" {
+		cacheHome = tmpDir
+	}
 
 	autosuggestDir := filepath.Join(tmpDir, "zsh-autosuggestions")
-	cloneCmd := exec.Command("git", "clone", "--depth", "1", "https://github.com/zsh-users/zsh-autosuggestions", autosuggestDir)
+	const zshAutosuggestionsTag = "v0.7.1"
+	cloneCmd := exec.Command("git", "clone", "--depth", "1", "--branch", zshAutosuggestionsTag, "https://github.com/zsh-users/zsh-autosuggestions", autosuggestDir)
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
 		os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("failed to clone zsh-autosuggestions: %v, output: %s", err, string(out))
@@ -145,7 +153,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -f "$MOCK_ERROR_FILE" ]; then
-    cat "$MOCK_ERROR_FILE" > "$XDG_CACHE_HOME/smart-suggestion/error"
+    cat "$MOCK_ERROR_FILE" >&2
     exit 1
 fi
 
@@ -189,7 +197,7 @@ SMART_SUGGESTION_DEBUG="true"
 	cmd.Env = append(os.Environ(),
 		"ZDOTDIR="+tmpDir,
 		"HOME="+tmpDir,
-		"XDG_CACHE_HOME="+tmpDir,
+		"XDG_CACHE_HOME="+cacheHome,
 		"XDG_CONFIG_HOME="+tmpDir,
 		"TERM=xterm-256color",
 		"MOCK_ERROR_FILE="+filepath.Join(tmpDir, "mock_error"),
@@ -248,6 +256,41 @@ SMART_SUGGESTION_DEBUG="true"
 func (s *zshSession) TriggerSuggest() {
 	// Send ^O (Ctrl-O) which is bound to _do_smart_suggestion
 	_, _ = s.pty.Write([]byte{0x0f})
+}
+
+func suggestionRequestDirs(cacheDir string) ([]string, error) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "suggest.") {
+			dirs = append(dirs, filepath.Join(cacheDir, entry.Name()))
+		}
+	}
+	return dirs, nil
+}
+
+func waitForSuggestionRequestCount(cacheDir string, want int, timeout time.Duration) ([]string, error) {
+	deadline := time.Now().Add(timeout)
+	for {
+		dirs, err := suggestionRequestDirs(cacheDir)
+		if err != nil {
+			return nil, err
+		}
+		if len(dirs) == want {
+			return dirs, nil
+		}
+		if time.Now().After(deadline) {
+			return dirs, fmt.Errorf("got %d suggestion request directories, want %d", len(dirs), want)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func TestAppendSuggestion(t *testing.T) {
@@ -878,5 +921,149 @@ func TestProxyStartedInHerdrWithoutPaneID(t *testing.T) {
 
 	if !strings.Contains(output, "PROXY_STARTED:proxy --scrollback-lines 100") {
 		t.Fatalf("Proxy did not start without HERDR_PANE_ID. Output:\n%s", output)
+	}
+}
+
+func TestNumericReplaceSuggestionIsNotReadAsPID(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	session, err := spawnZsh()
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	if err := session.SetMockResponse("=42"); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.SetMockDelay(time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	session.pty.Write([]byte("echo original"))
+	time.Sleep(200 * time.Millisecond)
+
+	session.TriggerSuggest()
+	cacheDir := filepath.Join(session.tmpDir, "smart-suggestion")
+	if _, err := waitForSuggestionRequestCount(cacheDir, 1, 5*time.Second); err != nil {
+		t.Fatalf("suggestion request did not start: %v", err)
+	}
+	if requestDirs, err := waitForSuggestionRequestCount(cacheDir, 0, 5*time.Second); err != nil {
+		t.Fatalf("suggestion request directories were not removed: %v (%v)", requestDirs, err)
+	}
+
+	if output, err := session.RunCommand("", 5*time.Second); err != nil {
+		t.Fatalf("numeric replace suggestion did not finish: %v. Output: %s", err, output)
+	}
+
+	_, err = session.Expect("42", 5*time.Second)
+	if err != nil {
+		t.Fatalf("numeric replace suggestion was not applied. Output: %s", session.output.String())
+	}
+}
+
+func TestPluginSecuresExistingCacheFiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	cacheHome := t.TempDir()
+	cacheDir := filepath.Join(cacheHome, "smart-suggestion")
+	if err := os.Mkdir(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	debugLog := filepath.Join(cacheDir, "debug.log")
+	if err := os.WriteFile(debugLog, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(debugLog, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	session, err := spawnZshWithProviderAndCache("openai", cacheHome)
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	info, err := os.Stat(cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o700 {
+		t.Fatalf("cache directory permissions are %o, want 700", info.Mode().Perm())
+	}
+	info, err = os.Stat(debugLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("debug log permissions are %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestConcurrentSuggestionsUseSeparateRequestDirectories(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	cacheHome := t.TempDir()
+	first, err := spawnZshWithProviderAndCache("openai", cacheHome)
+	if err != nil {
+		t.Fatalf("Failed to spawn first zsh: %v", err)
+	}
+	defer first.Close()
+	second, err := spawnZshWithProviderAndCache("openai", cacheHome)
+	if err != nil {
+		t.Fatalf("Failed to spawn second zsh: %v", err)
+	}
+	defer second.Close()
+
+	if err := first.SetMockResponse("=echo first_concurrent_suggestion"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SetMockDelay(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.SetMockResponse("=echo second_concurrent_suggestion"); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.SetMockDelay(2 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+
+	first.pty.Write([]byte("echo first_original"))
+	second.pty.Write([]byte("echo second_original"))
+	time.Sleep(200 * time.Millisecond)
+	first.TriggerSuggest()
+	second.TriggerSuggest()
+
+	cacheDir := filepath.Join(cacheHome, "smart-suggestion")
+	if requestDirs, err := waitForSuggestionRequestCount(cacheDir, 2, 5*time.Second); err != nil {
+		t.Fatalf("expected 2 concurrent request directories: %v (%v)", requestDirs, err)
+	}
+
+	if requestDirs, err := waitForSuggestionRequestCount(cacheDir, 0, 5*time.Second); err != nil {
+		t.Fatalf("suggestion request directories were not removed: %v (%v)", requestDirs, err)
+	}
+
+	firstOutput, err := first.RunCommand("", 3*time.Second)
+	if err != nil {
+		t.Fatalf("first suggestion did not finish: %v. Output: %s", err, firstOutput)
+	}
+	if !strings.Contains(firstOutput, "first_concurrent_suggestion") {
+		t.Fatalf("first shell received the wrong suggestion. Output: %s", firstOutput)
+	}
+	secondOutput, err := second.RunCommand("", 3*time.Second)
+	if err != nil {
+		t.Fatalf("second suggestion did not finish: %v. Output: %s", err, secondOutput)
+	}
+	if !strings.Contains(secondOutput, "second_concurrent_suggestion") {
+		t.Fatalf("second shell received the wrong suggestion. Output: %s", secondOutput)
 	}
 }
