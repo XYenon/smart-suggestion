@@ -51,10 +51,12 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
 fi
 
 : ${SMART_SUGGESTION_CACHE_DIR:="${XDG_CACHE_HOME:-$HOME/.cache}/smart-suggestion"}
-mkdir -p "$SMART_SUGGESTION_CACHE_DIR"
+(umask 077; mkdir -p "$SMART_SUGGESTION_CACHE_DIR") || return 1
+chmod 700 "$SMART_SUGGESTION_CACHE_DIR" || return 1
 
 if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-    touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+    (umask 077; touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log") || return 1
+    chmod 600 "${SMART_SUGGESTION_CACHE_DIR}/debug.log" || return 1
 fi
 
 # Detect binary path
@@ -139,6 +141,7 @@ function _smart_suggestion_shell_history() {
 
 function _fetch_suggestions() {
     local scrollback_file="$1"
+    local error_file="$2"
 
     # Source config file and export all variables
     _smart_suggestion_source_config
@@ -170,7 +173,7 @@ function _fetch_suggestions() {
         "${scrollback_file_args[@]}" \
         $debug_flag \
         $context_flag \
-        2> "${SMART_SUGGESTION_CACHE_DIR}/error"
+        2> "$error_file"
 
     return $?
 }
@@ -178,6 +181,7 @@ function _fetch_suggestions() {
 
 function _show_loading_animation() {
     local pid=$1
+    local canceled_file="$2"
     local interval=0.1
     local animation_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
     local i=1
@@ -186,7 +190,7 @@ function _show_loading_animation() {
         kill $pid 2>/dev/null
         # Clear the line and restore cursor
         tput -S <<<"cr el cnorm"
-        touch "${SMART_SUGGESTION_CACHE_DIR}/canceled"
+        touch "$canceled_file"
     }
     trap cleanup SIGINT EXIT
 
@@ -212,9 +216,6 @@ function _show_loading_animation() {
 
 function _do_smart_suggestion() {
     ##### Get input
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/canceled"
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/error"
-
     local scrollback_file=""
 
     # Ghostty: extract scrollback file path from buffer
@@ -232,67 +233,88 @@ function _do_smart_suggestion() {
     _zsh_autosuggest_clear
 
     ##### Fetch message
-    exec {OUTPUT_FD}< <(_fetch_suggestions "$scrollback_file" & echo $!)
-    read pid <&$OUTPUT_FD
+    local request_dir
+    request_dir=$(mktemp -d "${SMART_SUGGESTION_CACHE_DIR}/suggest.XXXXXXXX") || return 1
+    local fifo="${request_dir}/suggest.fifo"
+    local error_file="${request_dir}/error"
+    local canceled_file="${request_dir}/canceled"
+    local output_fd=""
 
-    _show_loading_animation $pid
-    local response_code=$?
-
-    # Ensure cursor is visible and line is cleared after animation
-    tput cnorm
-    zle -R ""
-
-    if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-        if command -v jq >/dev/null 2>&1; then
-            jq -n --arg date "$(date)" --arg log "Fetched message" --arg input "$input" --arg response_code "$response_code" \
-                '{date: $date, log: $log, input: $input, response_code: $response_code}' >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
-        else
-            echo "{\"date\":\"$(date)\",\"log\":\"Fetched message\",\"input\":\"$input\",\"response_code\":\"$response_code\"}" >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+    {
+        mkfifo "$fifo" || return 1
+        _fetch_suggestions "$scrollback_file" "$error_file" > "$fifo" &
+        local pid=$!
+        if ! exec {output_fd}< "$fifo"; then
+            kill $pid 2>/dev/null
+            return 1
         fi
-    fi
+        rm -f "$fifo"
 
-    if [[ -f "${SMART_SUGGESTION_CACHE_DIR}/canceled" ]]; then
-        _zsh_autosuggest_clear
-        return 1
-    fi
+        _show_loading_animation $pid "$canceled_file"
+        local response_code=$?
 
-    local message
-    read -u $OUTPUT_FD -d '' message || true
-    exec {OUTPUT_FD}<&-
+        # Ensure cursor is visible and line is cleared after animation
+        tput cnorm
+        zle -R ""
 
-    if [[ -z "$message" ]]; then
-        _zsh_autosuggest_clear
-        local error_msg
-        if [[ -s "${SMART_SUGGESTION_CACHE_DIR}/error" ]]; then
-            error_msg=$(<"${SMART_SUGGESTION_CACHE_DIR}/error")
-        fi
-        if [[ -z "${error_msg//[[:space:]]/}" ]]; then
-            error_msg="No suggestion available at this time. Please try again later."
+        if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
+            if command -v jq >/dev/null 2>&1; then
+                jq -n --arg date "$(date)" --arg log "Fetched message" --arg input "$input" --arg response_code "$response_code" \
+                    '{date: $date, log: $log, input: $input, response_code: $response_code}' >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+            else
+                echo "{\"date\":\"$(date)\",\"log\":\"Fetched message\",\"input\":\"$input\",\"response_code\":\"$response_code\"}" >> "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+            fi
         fi
 
-        zle -I
-        print -r -u2 -- "$error_msg"
-        return 1
-    fi
+        if [[ -f "$canceled_file" ]]; then
+            _zsh_autosuggest_clear
+            return 1
+        fi
 
-    ##### Process response
+        local message
+        read -u $output_fd -d '' message || true
+        exec {output_fd}<&-
+        output_fd=""
 
-    local first_char=${message:0:1}
-    local suggestion=${message:1:${#message}}
+        if [[ -z "$message" ]]; then
+            _zsh_autosuggest_clear
+            local error_msg
+            if [[ -s "$error_file" ]]; then
+                error_msg=$(<"$error_file")
+            fi
+            if [[ -z "${error_msg//[[:space:]]/}" ]]; then
+                error_msg="No suggestion available at this time. Please try again later."
+            fi
 
-    ##### And now, let's actually show the suggestion to the user!
+            zle -I
+            print -r -u2 -- "$error_msg"
+            return 1
+        fi
 
-    if [[ "$first_char" == '=' ]]; then
-        # Reset user input
-        BUFFER=""
-        CURSOR=0
+        ##### Process response
 
-        zle -U "$suggestion"
-    elif [[ "$first_char" == '+' ]]; then
-        _zsh_autosuggest_suggest "$suggestion"
-    fi
+        local first_char=${message:0:1}
+        local suggestion=${message:1:${#message}}
 
-    zle reset-prompt
+        ##### And now, let's actually show the suggestion to the user!
+
+        if [[ "$first_char" == '=' ]]; then
+            # Reset user input
+            BUFFER=""
+            CURSOR=0
+
+            zle -U "$suggestion"
+        elif [[ "$first_char" == '+' ]]; then
+            _zsh_autosuggest_suggest "$suggestion"
+        fi
+
+        zle reset-prompt
+    } always {
+        if [[ -n "$output_fd" ]]; then
+            exec {output_fd}<&-
+        fi
+        rm -rf "$request_dir"
+    }
 }
 
 function _check_smart_suggestion_updates() {

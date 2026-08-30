@@ -13,6 +13,18 @@
   "gomod": {
     "managerFilePatterns": ["/(^|/)go\\.mod$/"]
   },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal\\/zsh\\/integration_test\\.go$/"],
+      "matchStrings": [
+        "const zshAutosuggestionsTag = \"(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "depNameTemplate": "zsh-users/zsh-autosuggestions",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver-coerced"
+    }
+  ],
   "packageRules": [
     {
       "matchPackageNames": ["*"],
