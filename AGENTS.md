@@ -4,9 +4,9 @@
 
 ## Technology Stack
 
-- **Core Logic**: Go (1.24+)
+- **Core Logic**: Go (1.26+)
 - **Shell Integration**: Zsh script (`smart-suggestion.plugin.zsh`)
-- **AI Providers**: Support for OpenAI, Anthropic (Claude), Google Gemini, Azure OpenAI.
+- **AI Providers**: Support for OpenAI, Anthropic (Claude), Google Gemini, Azure OpenAI via `mozilla-ai/any-llm-go`.
 - **CLI Framework**: `cobra`
 - **Terminal Interaction**: `creack/pty` for proxy mode.
 

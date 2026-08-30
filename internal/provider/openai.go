@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/responses"
-	"github.com/openai/openai-go/shared"
+	anyllm "github.com/mozilla-ai/any-llm-go"
+	"github.com/mozilla-ai/any-llm-go/providers/openai"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 )
 
@@ -20,10 +18,11 @@ const (
 )
 
 type OpenAIProvider struct {
-	Model           string
 	APIType         OpenAIAPIType
-	ReasoningEffort shared.ReasoningEffort
-	Client          *openai.Client
+	Client          completionClient
+	Model           string
+	ReasoningEffort string
+	ResponsesClient responsesClient
 }
 
 func parseOpenAIAPIType(val string) (OpenAIAPIType, error) {
@@ -40,33 +39,30 @@ func parseOpenAIAPIType(val string) (OpenAIAPIType, error) {
 func NewOpenAIProvider() (*OpenAIProvider, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+		return nil, errMissingOpenAIAPIKey
 	}
 
-	options := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
+	opts := []anyllm.Option{anyllm.WithAPIKey(apiKey)}
 	if baseURL := normalizeBaseURL(os.Getenv("OPENAI_BASE_URL")); baseURL != "" {
-		options = append(options, option.WithBaseURL(baseURL))
+		opts = append(opts, anyllm.WithBaseURL(baseURL))
 	}
 
-	model := envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-5.6-terra")
+	client, err := openai.New(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating OpenAI client: %w", err)
+	}
 
 	apiType, err := parseOpenAIAPIType(os.Getenv("OPENAI_API_TYPE"))
 	if err != nil {
 		return nil, err
 	}
 
-	reasoningEffort := shared.ReasoningEffort(os.Getenv("OPENAI_REASONING_EFFORT"))
-
-	client := openai.NewClient(options...)
-
 	return &OpenAIProvider{
-		Model:           model,
 		APIType:         apiType,
-		ReasoningEffort: reasoningEffort,
-		Client:          &client,
+		Client:          client,
+		Model:           envOrDefault(os.Getenv("OPENAI_MODEL"), "gpt-5.6-terra"),
+		ReasoningEffort: os.Getenv("OPENAI_REASONING_EFFORT"),
+		ResponsesClient: client,
 	}, nil
 }
 
@@ -74,79 +70,81 @@ func (p *OpenAIProvider) Fetch(ctx context.Context, input string, systemPrompt s
 	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
 }
 
-func (p *OpenAIProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
+func (p *OpenAIProvider) FetchWithHistory(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	if p.APIType == OpenAIAPITypeResponses {
+		return p.fetchResponses(ctx, input, systemPrompt, history)
+	}
+
+	return p.fetchChatCompletions(ctx, input, systemPrompt, history)
+}
+
+func (p *OpenAIProvider) fetchChatCompletions(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	return fetchChat(ctx, chatFetch{
+		client: p.Client,
+		empty:  errNoOpenAIChoices,
+		fail:   failCreateChatCompletion,
+		model:  p.Model,
+		name:   "openai",
+		effort: p.ReasoningEffort,
+	}, input, systemPrompt, history)
+}
+
+func (p *OpenAIProvider) fetchResponses(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
 	logProviderRequest("openai", p.Model, systemPrompt, history, input)
 
-	switch p.APIType {
-	case OpenAIAPITypeResponses:
-		return p.fetchResponses(ctx, input, systemPrompt, history)
-	case OpenAIAPITypeChatCompletions:
-		fallthrough
-	default:
-		return p.fetchChatCompletions(ctx, input, systemPrompt, history)
-	}
-}
-
-func (p *OpenAIProvider) fetchChatCompletions(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	messages := buildOpenAIChatMessages(systemPrompt, input, history)
-
-	params := openai.ChatCompletionNewParams{
-		Model:    openai.ChatModel(p.Model),
-		Messages: messages,
+	params := anyllm.ResponsesParams{
+		Input:        buildResponsesInput(input, history),
+		Instructions: new(systemPrompt),
+		Model:        p.Model,
 	}
 	if p.ReasoningEffort != "" {
-		params.ReasoningEffort = p.ReasoningEffort
+		params.Reasoning = reasoningEffort(p.ReasoningEffort)
 	}
 
-	resp, err := p.Client.Chat.Completions.New(ctx, params)
-	debug.Log("Received OpenAI response", map[string]any{
-		"response": resp,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create chat completion: %w", err)
-	}
-
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices returned from OpenAI API")
-	}
-
-	return resp.Choices[0].Message.Content, nil
-}
-
-func (p *OpenAIProvider) fetchResponses(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	inputItems := buildOpenAIResponseInput(input, history)
-
-	params := responses.ResponseNewParams{
-		Model: responses.ResponsesModel(p.Model),
-		Input: responses.ResponseNewParamsInputUnion{
-			OfInputItemList: inputItems,
-		},
-	}
-	if systemPrompt != "" {
-		params.Instructions = openai.String(systemPrompt)
-	}
-	if p.ReasoningEffort != "" {
-		params.Reasoning = shared.ReasoningParam{
-			Effort: p.ReasoningEffort,
-		}
-	}
-
-	resp, err := p.Client.Responses.New(ctx, params)
-	debug.Log("Received OpenAI response", map[string]any{
+	resp, err := p.ResponsesClient.Responses(ctx, params)
+	debug.Log("Received openai response", map[string]any{
 		"response": resp,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create response: %w", err)
 	}
+	if resp == nil || resp.Output == "" {
+		if resp != nil && resp.ID != "" {
+			return "", errEmptyOpenAIOutput
+		}
 
-	if len(resp.Output) == 0 {
-		return "", fmt.Errorf("no output returned from OpenAI API")
+		return "", errNoOpenAIOutput
 	}
 
-	outputText := resp.OutputText()
-	if outputText == "" {
-		return "", fmt.Errorf("empty output text returned from OpenAI API")
-	}
+	return resp.Output, nil
+}
 
-	return outputText, nil
+func buildResponsesInput(input string, history []Message) []anyllm.ResponsesInputItem {
+	items := make([]anyllm.ResponsesInputItem, 0, len(history)+1)
+	for _, msg := range history {
+		switch msg.Role {
+		case roleUser:
+			items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleUser, Content: msg.Content})
+		case roleAssistant:
+			items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleAssistant, Content: msg.Content})
+		}
+	}
+	items = append(items, anyllm.ResponsesInputItem{Role: anyllm.RoleUser, Content: input})
+
+	return items
 }

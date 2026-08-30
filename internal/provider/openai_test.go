@@ -2,22 +2,17 @@ package provider
 
 import (
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/responses"
+	anyllm "github.com/mozilla-ai/any-llm-go"
 )
 
 func TestNewOpenAIProvider(t *testing.T) {
 	os.Setenv("OPENAI_API_KEY", "test-key")
 	defer os.Unsetenv("OPENAI_API_KEY")
 
-	// Default configuration
 	p, err := NewOpenAIProvider()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -29,7 +24,6 @@ func TestNewOpenAIProvider(t *testing.T) {
 		t.Errorf("expected default api type chat_completions, got %s", p.APIType)
 	}
 
-	// With OPENAI_API_TYPE=chat_completions
 	os.Setenv("OPENAI_API_TYPE", "chat_completions")
 	p, err = NewOpenAIProvider()
 	os.Unsetenv("OPENAI_API_TYPE")
@@ -40,7 +34,6 @@ func TestNewOpenAIProvider(t *testing.T) {
 		t.Errorf("expected api type chat_completions, got %s", p.APIType)
 	}
 
-	// With OPENAI_API_TYPE=responses
 	os.Setenv("OPENAI_API_TYPE", "responses")
 	p, err = NewOpenAIProvider()
 	os.Unsetenv("OPENAI_API_TYPE")
@@ -51,7 +44,6 @@ func TestNewOpenAIProvider(t *testing.T) {
 		t.Errorf("expected api type responses, got %s", p.APIType)
 	}
 
-	// With custom base URL and model
 	os.Setenv("OPENAI_BASE_URL", "https://api.custom.com/v1")
 	os.Setenv("OPENAI_MODEL", "gpt-4o")
 	p, err = NewOpenAIProvider()
@@ -64,7 +56,6 @@ func TestNewOpenAIProvider(t *testing.T) {
 		t.Errorf("expected model gpt-4o, got %s", p.Model)
 	}
 
-	// With OPENAI_REASONING_EFFORT
 	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
 		os.Setenv("OPENAI_REASONING_EFFORT", effort)
 		p, err = NewOpenAIProvider()
@@ -72,7 +63,7 @@ func TestNewOpenAIProvider(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
 		}
-		if string(p.ReasoningEffort) != effort {
+		if p.ReasoningEffort != effort {
 			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
 		}
 	}
@@ -102,108 +93,52 @@ func TestNewOpenAIProvider_Errors(t *testing.T) {
 func TestOpenAIProvider_Fetch_ChatCompletions(t *testing.T) {
 	cases := []TestCase{
 		{
-			Name:         "successful command suggestion",
-			Input:        "how to list files",
-			SystemPrompt: "you are a shell assistant",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "chatcmpl-123",
-				"object": "chat.completion",
-				"created": 1677652288,
-				"model": "gpt-4o-mini",
-				"choices": [
-					{
-						"index": 0,
-						"message": {
-							"role": "assistant",
-							"content": "<reasoning>The user wants to list files.</reasoning>=ls -l"
-						},
-						"finish_reason": "stop"
-					}
-				],
-				"usage": {
-					"prompt_tokens": 9,
-					"completion_tokens": 12,
-					"total_tokens": 21
-				}
-			}`,
+			Name:           "successful command suggestion",
+			Input:          "how to list files",
+			SystemPrompt:   "you are a shell assistant",
 			ExpectedOutput: "=ls -l",
 		},
 		{
-			Name:         "successful completion suggestion",
-			Input:        "ls -",
-			SystemPrompt: "you are a shell assistant",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "chatcmpl-456",
-				"object": "chat.completion",
-				"created": 1677652288,
-				"model": "gpt-4o-mini",
-				"choices": [
-					{
-						"index": 0,
-						"message": {
-							"role": "assistant",
-							"content": "<reasoning>The user is typing ls and wants completion.</reasoning>+la"
-						},
-						"finish_reason": "stop"
-					}
-				]
-			}`,
+			Name:           "successful completion suggestion",
+			Input:          "ls -",
+			SystemPrompt:   "you are a shell assistant",
 			ExpectedOutput: "+la",
 		},
 		{
 			Name:          "API error",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusBadRequest,
-			MockResponse:  `{"error": {"message": "invalid api key"}}`,
 			ExpectedError: "failed to create chat completion",
 		},
 		{
-			Name:          "malformed JSON",
+			Name:          "no choices",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusOK,
-			MockResponse:  `{"choices": [{"message": {"content": "broken`,
-			ExpectedError: "failed to create chat completion",
-		},
-		{
-			Name:         "no choices",
-			Input:        "test",
-			SystemPrompt: "test",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "chatcmpl-789",
-				"object": "chat.completion",
-				"choices": []
-			}`,
 			ExpectedError: "no choices returned from OpenAI API",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.MockStatus)
-				fmt.Fprint(w, tc.MockResponse)
-			}))
-			defer server.Close()
-
-			client := openai.NewClient(
-				option.WithAPIKey("test-key"),
-				option.WithBaseURL(server.URL),
-			)
+			fake := &fakeCompletionClient{}
+			switch tc.Name {
+			case "successful command suggestion":
+				fake.response = completionFromContent("<reasoning>The user wants to list files.</reasoning>=ls -l")
+			case "successful completion suggestion":
+				fake.response = completionFromContent("<reasoning>The user is typing ls and wants completion.</reasoning>+la")
+			case "API error":
+				fake.err = fmt.Errorf("invalid api key")
+			case "no choices":
+				fake.response = &anyllm.ChatCompletion{}
+			}
 
 			p := &OpenAIProvider{
-				Model:   "gpt-4o-mini",
 				APIType: OpenAIAPITypeChatCompletions,
-				Client:  &client,
+				Client:  fake,
+				Model:   "gpt-4o-mini",
 			}
 
 			resp, err := p.Fetch(t.Context(), tc.Input, tc.SystemPrompt)
-
 			if tc.ExpectedError != "" {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tc.ExpectedError)
@@ -212,11 +147,9 @@ func TestOpenAIProvider_Fetch_ChatCompletions(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			got := ParseAndExtractCommand(resp)
 			if got != tc.ExpectedOutput {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
@@ -225,51 +158,36 @@ func TestOpenAIProvider_Fetch_ChatCompletions(t *testing.T) {
 	}
 }
 
-type openAITestCase struct {
-	Name           string
-	Input          string
-	SystemPrompt   string
-	History        []Message
-	MockResponse   string
-	MockStatus     int
-	ExpectedOutput string
-	ExpectedError  string
-}
-
 func TestOpenAIProvider_Fetch_Responses(t *testing.T) {
-	cases := []openAITestCase{
+	cases := []struct {
+		Name           string
+		Input          string
+		SystemPrompt   string
+		History        []Message
+		Response       *anyllm.ResponsesResult
+		Err            error
+		ExpectedOutput string
+		ExpectedError  string
+	}{
 		{
 			Name:         "successful command suggestion",
 			Input:        "how to list files",
 			SystemPrompt: "you are a shell assistant",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "resp_123",
-				"object": "response",
-				"created_at": 1740000000,
-				"status": "completed",
-				"model": "gpt-4o-mini",
-				"output": [
-					{
-						"id": "msg_123",
-						"type": "message",
-						"status": "completed",
-						"role": "assistant",
-						"content": [
-							{
-								"type": "output_text",
-								"text": "<reasoning>The user wants to list files.</reasoning>=ls -l"
-							}
-						]
-					}
-				],
-				"usage": {
-					"input_tokens": 9,
-					"output_tokens": 12,
-					"total_tokens": 21
-				}
-			}`,
+			Response: &anyllm.ResponsesResult{
+				ID:     "resp_123",
+				Output: "<reasoning>The user wants to list files.</reasoning>=ls -l",
+			},
 			ExpectedOutput: "=ls -l",
+		},
+		{
+			Name:         "successful response with empty system prompt",
+			Input:        "list files",
+			SystemPrompt: "",
+			Response: &anyllm.ResponsesResult{
+				ID:     "resp_empty_instructions",
+				Output: "=ls",
+			},
+			ExpectedOutput: "=ls",
 		},
 		{
 			Name:         "successful completion suggestion with history",
@@ -279,105 +197,42 @@ func TestOpenAIProvider_Fetch_Responses(t *testing.T) {
 				{Role: "user", Content: "hello"},
 				{Role: "assistant", Content: "world"},
 			},
-			MockStatus: http.StatusOK,
-			MockResponse: `{
-				"id": "resp_456",
-				"object": "response",
-				"created_at": 1740000000,
-				"status": "completed",
-				"model": "gpt-4o-mini",
-				"output": [
-					{
-						"id": "msg_456",
-						"type": "message",
-						"status": "completed",
-						"role": "assistant",
-						"content": [
-							{
-								"type": "output_text",
-								"text": "<reasoning>The user is typing ls and wants completion.</reasoning>+la"
-							}
-						]
-					}
-				]
-			}`,
+			Response: &anyllm.ResponsesResult{
+				ID:     "resp_456",
+				Output: "<reasoning>The user is typing ls and wants completion.</reasoning>+la",
+			},
 			ExpectedOutput: "+la",
 		},
 		{
 			Name:          "API error",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusBadRequest,
-			MockResponse:  `{"error": {"message": "invalid api key"}}`,
+			Err:           fmt.Errorf("invalid api key"),
 			ExpectedError: "failed to create response",
 		},
 		{
-			Name:          "malformed JSON",
+			Name:          "no output",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusOK,
-			MockResponse:  `{"output": [{"content": [{"text": "broken`,
-			ExpectedError: "failed to create response",
-		},
-		{
-			Name:         "no output",
-			Input:        "test",
-			SystemPrompt: "test",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "resp_789",
-				"object": "response",
-				"status": "completed",
-				"output": []
-			}`,
+			Response:      &anyllm.ResponsesResult{},
 			ExpectedError: "no output returned from OpenAI API",
 		},
 		{
-			Name:         "empty output text",
-			Input:        "test",
-			SystemPrompt: "test",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"id": "resp_000",
-				"object": "response",
-				"status": "completed",
-				"output": [
-					{
-						"id": "msg_000",
-						"type": "message",
-						"status": "completed",
-						"role": "assistant",
-						"content": [
-							{
-								"type": "output_text",
-								"text": ""
-							}
-						]
-					}
-				]
-			}`,
+			Name:          "empty output text",
+			Input:         "test",
+			SystemPrompt:  "test",
+			Response:      &anyllm.ResponsesResult{ID: "resp_000"},
 			ExpectedError: "empty output text returned from OpenAI API",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.MockStatus)
-				fmt.Fprint(w, tc.MockResponse)
-			}))
-			defer server.Close()
-
-			client := openai.NewClient(
-				option.WithAPIKey("test-key"),
-				option.WithBaseURL(server.URL),
-			)
-
+			fake := &fakeResponsesClient{response: tc.Response, err: tc.Err}
 			p := &OpenAIProvider{
-				Model:   "gpt-4o-mini",
-				APIType: OpenAIAPITypeResponses,
-				Client:  &client,
+				APIType:         OpenAIAPITypeResponses,
+				Model:           "gpt-4o-mini",
+				ResponsesClient: fake,
 			}
 
 			var resp string
@@ -386,6 +241,12 @@ func TestOpenAIProvider_Fetch_Responses(t *testing.T) {
 				resp, err = p.FetchWithHistory(t.Context(), tc.Input, tc.SystemPrompt, tc.History)
 			} else {
 				resp, err = p.Fetch(t.Context(), tc.Input, tc.SystemPrompt)
+			}
+			if fake.last.Instructions == nil {
+				t.Fatal("expected instructions to be present")
+			}
+			if *fake.last.Instructions != tc.SystemPrompt {
+				t.Errorf("expected instructions %q, got %q", tc.SystemPrompt, *fake.last.Instructions)
 			}
 
 			if tc.ExpectedError != "" {
@@ -396,11 +257,9 @@ func TestOpenAIProvider_Fetch_Responses(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			got := ParseAndExtractCommand(resp)
 			if got != tc.ExpectedOutput {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
@@ -409,61 +268,26 @@ func TestOpenAIProvider_Fetch_Responses(t *testing.T) {
 	}
 }
 
-func TestBuildOpenAIResponseInput(t *testing.T) {
+func TestBuildResponsesInput(t *testing.T) {
 	history := []Message{
 		{Role: "user", Content: "cmd 1"},
 		{Role: "assistant", Content: "result 1"},
 		{Role: "system", Content: "ignore this"},
 	}
-	input := "cmd 2"
-
-	items := buildOpenAIResponseInput(input, history)
+	items := buildResponsesInput("cmd 2", history)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
-	}
-
-	// Verify items are valid ResponseInputParam
-	param := responses.ResponseInputParam(items)
-	if len(param) != 3 {
-		t.Fatalf("expected 3 items in param, got %d", len(param))
 	}
 }
 
 func TestOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 	t.Run("chat_completions with reasoning effort", func(t *testing.T) {
-		var capturedBody string
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{
-				"id": "chatcmpl-123",
-				"object": "chat.completion",
-				"created": 1677652288,
-				"model": "o3-mini",
-				"choices": [
-					{
-						"index": 0,
-						"message": {
-							"role": "assistant",
-							"content": "=ls -la"
-						},
-						"finish_reason": "stop"
-					}
-				]
-			}`)
-		}))
-		defer server.Close()
-
-		client := openai.NewClient(
-			option.WithAPIKey("test-key"),
-			option.WithBaseURL(server.URL),
-		)
-
+		fake := &fakeCompletionClient{response: completionFromContent("=ls -la")}
 		p := &OpenAIProvider{
-			Model:           "o3-mini",
 			APIType:         OpenAIAPITypeChatCompletions,
+			Client:          fake,
+			Model:           "o3-mini",
 			ReasoningEffort: "low",
-			Client:          &client,
 		}
 
 		resp, err := p.Fetch(t.Context(), "list files", "system prompt")
@@ -473,47 +297,18 @@ func TestOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 		if resp != "=ls -la" {
 			t.Errorf("expected '=ls -la', got %q", resp)
 		}
-		_ = capturedBody
+		if fake.last.ReasoningEffort != "low" {
+			t.Errorf("expected reasoning effort low, got %s", fake.last.ReasoningEffort)
+		}
 	})
 
 	t.Run("responses with reasoning effort", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, `{
-				"id": "resp_123",
-				"object": "response",
-				"created_at": 1740000000,
-				"status": "completed",
-				"model": "o3-mini",
-				"output": [
-					{
-						"id": "msg_123",
-						"type": "message",
-						"status": "completed",
-						"role": "assistant",
-						"content": [
-							{
-								"type": "output_text",
-								"text": "=ls -la"
-							}
-						]
-					}
-				]
-			}`)
-		}))
-		defer server.Close()
-
-		client := openai.NewClient(
-			option.WithAPIKey("test-key"),
-			option.WithBaseURL(server.URL),
-		)
-
+		fake := &fakeResponsesClient{response: &anyllm.ResponsesResult{ID: "resp_123", Output: "=ls -la"}}
 		p := &OpenAIProvider{
-			Model:           "o3-mini",
 			APIType:         OpenAIAPITypeResponses,
+			Model:           "o3-mini",
 			ReasoningEffort: "medium",
-			Client:          &client,
+			ResponsesClient: fake,
 		}
 
 		resp, err := p.Fetch(t.Context(), "list files", "system prompt")
@@ -522,6 +317,9 @@ func TestOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 		}
 		if resp != "=ls -la" {
 			t.Errorf("expected '=ls -la', got %q", resp)
+		}
+		if fake.last.Reasoning != "medium" {
+			t.Errorf("expected reasoning effort medium, got %s", fake.last.Reasoning)
 		}
 	})
 }
