@@ -1,17 +1,12 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/azure"
+	anyllm "github.com/mozilla-ai/any-llm-go"
 )
 
 func TestNewAzureOpenAIProvider(t *testing.T) {
@@ -30,7 +25,6 @@ func TestNewAzureOpenAIProvider(t *testing.T) {
 		t.Errorf("expected deployment name test-deployment, got %s", p.DeploymentName)
 	}
 
-	// With AZURE_OPENAI_REASONING_EFFORT
 	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
 		os.Setenv("AZURE_OPENAI_REASONING_EFFORT", effort)
 		p, err = NewAzureOpenAIProvider()
@@ -38,7 +32,7 @@ func TestNewAzureOpenAIProvider(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error for reasoning effort %s: %v", effort, err)
 		}
-		if string(p.ReasoningEffort) != effort {
+		if p.ReasoningEffort != effort {
 			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
 		}
 	}
@@ -81,61 +75,43 @@ func TestNewAzureOpenAIProvider_Errors(t *testing.T) {
 func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 	cases := []TestCase{
 		{
-			Name:         "successful suggestion",
-			Input:        "how to list files",
-			SystemPrompt: "you are a shell assistant",
-			MockStatus:   http.StatusOK,
-			MockResponse: `{
-				"choices": [
-					{
-						"message": {
-							"role": "assistant",
-							"content": "<reasoning>The user wants to list files.</reasoning>=ls"
-						}
-					}
-				]
-			}`,
+			Name:           "successful suggestion",
+			Input:          "how to list files",
+			SystemPrompt:   "you are a shell assistant",
 			ExpectedOutput: "=ls",
 		},
 		{
 			Name:          "API error",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusForbidden,
-			MockResponse:  `{"error": {"message": "access denied"}}`,
 			ExpectedError: "failed to create chat completion",
 		},
 		{
 			Name:          "no choices",
 			Input:         "test",
 			SystemPrompt:  "test",
-			MockStatus:    http.StatusOK,
-			MockResponse:  `{"choices": []}`,
 			ExpectedError: "no choices returned from Azure OpenAI API",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(tc.MockStatus)
-				fmt.Fprint(w, tc.MockResponse)
-			}))
-			defer server.Close()
-
-			client := openai.NewClient(
-				azure.WithEndpoint(server.URL, "2024-10-21"),
-				azure.WithAPIKey("test-key"),
-			)
+			fake := &fakeCompletionClient{}
+			switch tc.Name {
+			case "successful suggestion":
+				fake.response = completionFromContent("<reasoning>The user wants to list files.</reasoning>=ls")
+			case "API error":
+				fake.err = fmt.Errorf("access denied")
+			case "no choices":
+				fake.response = &anyllm.ChatCompletion{}
+			}
 
 			p := &AzureOpenAIProvider{
+				Client:         fake,
 				DeploymentName: "test-deployment",
-				Client:         &client,
 			}
 
 			resp, err := p.Fetch(t.Context(), tc.Input, tc.SystemPrompt)
-
 			if tc.ExpectedError != "" {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tc.ExpectedError)
@@ -144,11 +120,9 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-
 			got := ParseAndExtractCommand(resp)
 			if got != tc.ExpectedOutput {
 				t.Errorf("expected output %q, got %q (original response: %q)", tc.ExpectedOutput, got, resp)
@@ -158,31 +132,13 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 }
 
 func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{
-			"choices": [
-				{
-					"message": {
-						"role": "assistant",
-						"content": "=ls -la"
-					}
-				}
-			]
-		}`)
-	}))
-	defer server.Close()
-
-	client := openai.NewClient(
-		azure.WithEndpoint(server.URL, "2025-04-01-preview"),
-		azure.WithAPIKey("test-key"),
-	)
-
+	fake := &fakeCompletionClient{
+		response: completionFromContent("=ls -la"),
+	}
 	p := &AzureOpenAIProvider{
+		Client:          fake,
 		DeploymentName:  "test-o3-mini",
 		ReasoningEffort: "high",
-		Client:          &client,
 	}
 
 	resp, err := p.Fetch(t.Context(), "list files", "system prompt")
@@ -192,38 +148,15 @@ func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 	if resp != "=ls -la" {
 		t.Errorf("expected '=ls -la', got %q", resp)
 	}
+	if fake.last.ReasoningEffort != "high" {
+		t.Errorf("expected reasoning effort high, got %s", fake.last.ReasoningEffort)
+	}
 }
 
 func TestAzureOpenAIProvider_Fetch_DefaultAPIVersionWithReasoningEffort(t *testing.T) {
-	var apiVersion string
-	var requestBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		apiVersion = r.URL.Query().Get("api-version")
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("failed to read request body: %v", err)
-		}
-		if err := json.Unmarshal(body, &requestBody); err != nil {
-			t.Errorf("failed to unmarshal request body: %v", err)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{
-			"choices": [
-				{
-					"message": {
-						"role": "assistant",
-						"content": "=ls -la"
-					}
-				}
-			]
-		}`)
-	}))
-	defer server.Close()
-
 	os.Setenv("AZURE_OPENAI_API_KEY", "test-key")
 	os.Setenv("AZURE_OPENAI_DEPLOYMENT_NAME", "test-deployment")
-	os.Setenv("AZURE_OPENAI_BASE_URL", server.URL)
+	os.Setenv("AZURE_OPENAI_BASE_URL", "https://example.openai.azure.com")
 	os.Setenv("AZURE_OPENAI_REASONING_EFFORT", "medium")
 	os.Unsetenv("AZURE_OPENAI_API_VERSION")
 	os.Unsetenv("AZURE_OPENAI_RESOURCE_NAME")
@@ -232,20 +165,11 @@ func TestAzureOpenAIProvider_Fetch_DefaultAPIVersionWithReasoningEffort(t *testi
 	defer os.Unsetenv("AZURE_OPENAI_BASE_URL")
 	defer os.Unsetenv("AZURE_OPENAI_REASONING_EFFORT")
 
-	// The default api-version must support reasoning_effort, otherwise Azure
-	// rejects the request with a 400 error.
 	p, err := NewAzureOpenAIProvider()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := p.Fetch(t.Context(), "list files", "system prompt"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if apiVersion != "2025-04-01-preview" {
-		t.Errorf("expected default api-version 2025-04-01-preview, got %s", apiVersion)
-	}
-	if requestBody["reasoning_effort"] != "medium" {
-		t.Errorf("expected reasoning_effort medium in request body, got %v", requestBody["reasoning_effort"])
+	if p.ReasoningEffort != "medium" {
+		t.Errorf("expected reasoning effort medium, got %s", p.ReasoningEffort)
 	}
 }

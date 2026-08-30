@@ -4,43 +4,37 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
-	"github.com/xyenon/smart-suggestion/internal/debug"
+	anyllm "github.com/mozilla-ai/any-llm-go"
+	"github.com/mozilla-ai/any-llm-go/providers/anthropic"
 )
 
 type AnthropicProvider struct {
+	Client          completionClient
 	Model           string
 	ReasoningEffort string
-	Client          *anthropic.Client
 }
 
 func NewAnthropicProvider() (*AnthropicProvider, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable is not set")
+		return nil, errMissingAnthropicAPIKey
 	}
 
-	options := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-	}
-
+	opts := []anyllm.Option{anyllm.WithAPIKey(apiKey)}
 	if baseURL := normalizeBaseURL(os.Getenv("ANTHROPIC_BASE_URL")); baseURL != "" {
-		options = append(options, option.WithBaseURL(baseURL))
+		opts = append(opts, anyllm.WithBaseURL(baseURL))
 	}
 
-	model := envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-sonnet-5")
-
-	reasoningEffort := os.Getenv("ANTHROPIC_REASONING_EFFORT")
-
-	client := anthropic.NewClient(options...)
+	client, err := anthropic.New(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("creating Anthropic client: %w", err)
+	}
 
 	return &AnthropicProvider{
-		Model:           model,
-		ReasoningEffort: reasoningEffort,
-		Client:          &client,
+		Client:          client,
+		Model:           envOrDefault(os.Getenv("ANTHROPIC_MODEL"), "claude-sonnet-5"),
+		ReasoningEffort: os.Getenv("ANTHROPIC_REASONING_EFFORT"),
 	}, nil
 }
 
@@ -48,61 +42,18 @@ func (p *AnthropicProvider) Fetch(ctx context.Context, input string, systemPromp
 	return p.FetchWithHistory(ctx, input, systemPrompt, nil)
 }
 
-func (p *AnthropicProvider) FetchWithHistory(ctx context.Context, input string, systemPrompt string, history []Message) (string, error) {
-	logProviderRequest("anthropic", p.Model, systemPrompt, history, input)
-
-	messages := []anthropic.MessageParam{}
-	for _, msg := range history {
-		switch msg.Role {
-		case "user":
-			messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(msg.Content)))
-		case "assistant":
-			messages = append(messages, anthropic.NewAssistantMessage(anthropic.NewTextBlock(msg.Content)))
-		}
-	}
-
-	messages = append(messages, anthropic.NewUserMessage(anthropic.NewTextBlock(input)))
-
-	// MaxTokens caps thinking plus answer text, so leave room for reasoning
-	// when ANTHROPIC_REASONING_EFFORT is enabled.
-	params := anthropic.MessageNewParams{
-		Model:     anthropic.Model(p.Model),
-		MaxTokens: 4096,
-		System:    []anthropic.TextBlockParam{{Text: systemPrompt}},
-		Messages:  messages,
-	}
-
-	if p.ReasoningEffort != "" {
-		params.Thinking = anthropic.ThinkingConfigParamUnion{
-			OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{},
-		}
-		params.OutputConfig = anthropic.OutputConfigParam{
-			Effort: anthropic.OutputConfigEffort(p.ReasoningEffort),
-		}
-	}
-
-	resp, err := p.Client.Messages.New(ctx, params)
-	debug.Log("Received Anthropic response", map[string]any{
-		"response": resp,
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create message: %w", err)
-	}
-
-	if len(resp.Content) == 0 {
-		return "", fmt.Errorf("no content returned from Anthropic API")
-	}
-
-	var textBuilder strings.Builder
-	for _, block := range resp.Content {
-		if block.Type == "text" || block.Text != "" {
-			textBuilder.WriteString(block.Text)
-		}
-	}
-
-	if textBuilder.Len() == 0 {
-		return "", fmt.Errorf("no text content returned from Anthropic API")
-	}
-
-	return textBuilder.String(), nil
+func (p *AnthropicProvider) FetchWithHistory(
+	ctx context.Context,
+	input string,
+	systemPrompt string,
+	history []Message,
+) (string, error) {
+	return fetchChat(ctx, chatFetch{
+		client: p.Client,
+		empty:  errNoAnthropicContent,
+		fail:   "failed to create message",
+		model:  p.Model,
+		name:   "anthropic",
+		effort: p.ReasoningEffort,
+	}, input, systemPrompt, history)
 }
