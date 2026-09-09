@@ -51,10 +51,12 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
 fi
 
 : ${SMART_SUGGESTION_CACHE_DIR:="${XDG_CACHE_HOME:-$HOME/.cache}/smart-suggestion"}
-mkdir -p "$SMART_SUGGESTION_CACHE_DIR"
+(umask 077; mkdir -p "$SMART_SUGGESTION_CACHE_DIR") || return 1
+chmod 700 "$SMART_SUGGESTION_CACHE_DIR" || return 1
 
 if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-    touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+    (umask 077; touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log") || return 1
+    chmod 600 "${SMART_SUGGESTION_CACHE_DIR}/debug.log" || return 1
 fi
 
 # Detect binary path
@@ -139,6 +141,7 @@ function _smart_suggestion_shell_history() {
 
 function _fetch_suggestions() {
     local scrollback_file="$1"
+    local error_file="$2"
 
     # Source config file and export all variables
     _smart_suggestion_source_config
@@ -170,7 +173,7 @@ function _fetch_suggestions() {
         "${scrollback_file_args[@]}" \
         $debug_flag \
         $context_flag \
-        2> "${SMART_SUGGESTION_CACHE_DIR}/error"
+        2> "$error_file"
 
     return $?
 }
@@ -178,6 +181,7 @@ function _fetch_suggestions() {
 
 function _show_loading_animation() {
     local pid=$1
+    local canceled_file=$2
     local interval=0.1
     local animation_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
     local i=1
@@ -186,7 +190,7 @@ function _show_loading_animation() {
         kill $pid 2>/dev/null
         # Clear the line and restore cursor
         tput -S <<<"cr el cnorm"
-        touch "${SMART_SUGGESTION_CACHE_DIR}/canceled"
+        touch "$canceled_file"
     }
     trap cleanup SIGINT EXIT
 
@@ -212,8 +216,11 @@ function _show_loading_animation() {
 
 function _do_smart_suggestion() {
     ##### Get input
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/canceled"
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/error"
+    setopt localoptions nomonitor
+    local canceled_file="${SMART_SUGGESTION_CACHE_DIR}/canceled.$$"
+    local error_file="${SMART_SUGGESTION_CACHE_DIR}/error.$$"
+    local out_file="${SMART_SUGGESTION_CACHE_DIR}/suggest.$$"
+    rm -f "$canceled_file" "$error_file" "$out_file"
 
     local scrollback_file=""
 
@@ -232,10 +239,13 @@ function _do_smart_suggestion() {
     _zsh_autosuggest_clear
 
     ##### Fetch message
-    exec {OUTPUT_FD}< <(_fetch_suggestions "$scrollback_file" & echo $!)
-    read pid <&$OUTPUT_FD
+    # Write the suggestion to a per-shell temp file so the worker PID is not
+    # mixed into stdout (numeric replies like "=42" were being read as the PID).
+    _fetch_suggestions "$scrollback_file" "$error_file" > "$out_file" &
+    local pid=$!
 
-    _show_loading_animation $pid
+    _show_loading_animation $pid "$canceled_file"
+    wait $pid 2>/dev/null
     local response_code=$?
 
     # Ensure cursor is visible and line is cleared after animation
@@ -251,21 +261,24 @@ function _do_smart_suggestion() {
         fi
     fi
 
-    if [[ -f "${SMART_SUGGESTION_CACHE_DIR}/canceled" ]]; then
+    if [[ -f "$canceled_file" ]]; then
         _zsh_autosuggest_clear
+        rm -f "$canceled_file" "$error_file" "$out_file"
         return 1
     fi
 
-    local message
-    read -u $OUTPUT_FD -d '' message || true
-    exec {OUTPUT_FD}<&-
+    local message=""
+    if [[ -f "$out_file" ]]; then
+        read -r -d '' message < "$out_file" || true
+    fi
 
     if [[ -z "$message" ]]; then
         _zsh_autosuggest_clear
         local error_msg
-        if [[ -s "${SMART_SUGGESTION_CACHE_DIR}/error" ]]; then
-            error_msg=$(<"${SMART_SUGGESTION_CACHE_DIR}/error")
+        if [[ -s "$error_file" ]]; then
+            error_msg=$(<"$error_file")
         fi
+        rm -f "$canceled_file" "$error_file" "$out_file"
         if [[ -z "${error_msg//[[:space:]]/}" ]]; then
             error_msg="No suggestion available at this time. Please try again later."
         fi
@@ -274,6 +287,7 @@ function _do_smart_suggestion() {
         print -r -u2 -- "$error_msg"
         return 1
     fi
+    rm -f "$canceled_file" "$error_file" "$out_file"
 
     ##### Process response
 
