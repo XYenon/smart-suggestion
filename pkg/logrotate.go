@@ -81,12 +81,11 @@ func (lr *LogRotator) rotateFile(logFilePath string) error {
 	if err != nil {
 		return err
 	}
+	defer os.Remove(backupReservationPath(backupPath))
 
 	if err := os.Rename(logFilePath, backupPath); err != nil {
-		_ = os.Remove(backupReservationPath(backupPath))
 		return fmt.Errorf("failed to rename log file %s to %s: %w", logFilePath, backupPath, err)
 	}
-	_ = os.Remove(backupReservationPath(backupPath))
 
 	// Compress the backup file if enabled
 	if lr.config.Compress {
@@ -185,18 +184,33 @@ func logMissing(logFilePath string) (bool, error) {
 	return !exists, nil
 }
 
-// WithLogRotateLock serializes rotate → compress → cleanup and live writers
-// for one log across processes. The proxy writer holds this lock around each
-// flush so it can reopen the log fd after a rename instead of writing to an
-// unlinked inode.
+// WithLogRotateLock takes an exclusive per-log lock for rotate → compress →
+// cleanup and for live writers that truncate/rewrite the file.
 func WithLogRotateLock(logFilePath string, fn func() error) error {
+	return withLogLock(logFilePath, syscall.LOCK_EX, fn)
+}
+
+// WithLogReadLock takes a shared per-log lock so readers see a complete
+// snapshot instead of a file that is mid-truncate or mid-rewrite.
+func WithLogReadLock(logFilePath string, fn func() error) error {
+	exists, err := fileExists(logFilePath)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fn()
+	}
+	return withLogLock(logFilePath, syscall.LOCK_SH, fn)
+}
+
+func withLogLock(logFilePath string, how int, fn func() error) error {
 	lockPath := logRotateLockPath(logFilePath)
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return fmt.Errorf("failed to open rotation lock %s: %w", lockPath, err)
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+	if err := syscall.Flock(int(f.Fd()), how); err != nil {
 		return fmt.Errorf("failed to acquire rotation lock %s: %w", lockPath, err)
 	}
 	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
@@ -230,16 +244,34 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 		_ = f.Close()
 
 		inUse, err := backupNameInUse(candidate)
-		if err != nil {
+		if err != nil || inUse {
 			_ = os.Remove(reservation)
-			return "", err
-		}
-		if inUse {
-			_ = os.Remove(reservation)
+			if err != nil {
+				return "", err
+			}
 			continue
 		}
 		return candidate, nil
 	}
+}
+
+func preferCompressedBackup(paths []string) string {
+	for _, path := range paths {
+		if strings.HasSuffix(path, ".gz") {
+			return path
+		}
+	}
+	return paths[0]
+}
+
+func keepOneBackup(paths []string) string {
+	kept := preferCompressedBackup(paths)
+	for _, path := range paths {
+		if path != kept {
+			os.Remove(path)
+		}
+	}
+	return kept
 }
 
 func backupNameInUse(candidate string) (bool, error) {
@@ -337,13 +369,17 @@ func (lr *LogRotator) cleanupOldBackups(logFilePath string) error {
 		return fmt.Errorf("failed to find backup files for %s: %w", logFilePath, err)
 	}
 
+	type backupKey struct {
+		when time.Time
+		seq  int
+	}
 	type backupFile struct {
 		path string
 		when time.Time
 		seq  int
 	}
 
-	var backups []backupFile
+	grouped := make(map[backupKey][]string)
 	cutoffTime := time.Now().AddDate(0, 0, -lr.config.MaxAge)
 
 	for _, match := range matches {
@@ -361,10 +397,16 @@ func (lr *LogRotator) cleanupOldBackups(logFilePath string) error {
 			continue
 		}
 
+		key := backupKey{when: stamp, seq: seq}
+		grouped[key] = append(grouped[key], match)
+	}
+
+	var backups []backupFile
+	for key, paths := range grouped {
 		backups = append(backups, backupFile{
-			path: match,
-			when: stamp,
-			seq:  seq,
+			path: keepOneBackup(paths),
+			when: key.when,
+			seq:  key.seq,
 		})
 	}
 

@@ -430,6 +430,34 @@ func TestCleanupRemovesStaleReservationAndTempGzip(t *testing.T) {
 	}
 }
 
+func TestCleanupCollapsesRawAndGzipOfSameRotation(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	raw := filepath.Join(tempDir, "test-20260910-120000.log")
+	gz := filepath.Join(tempDir, "test-20260910-120000.log.gz")
+	if err := os.WriteFile(raw, []byte("raw"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(gz, []byte("gz"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := NewLogRotator(&LogRotateConfig{MaxSize: 1, MaxBackups: 5, MaxAge: 3650, Compress: false})
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lr.CheckAndRotate(logFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(raw); !os.IsNotExist(err) {
+		t.Fatalf("raw backup should be dropped when .gz exists: %v", err)
+	}
+	if _, err := os.Stat(gz); err != nil {
+		t.Fatalf("compressed backup was removed: %v", err)
+	}
+}
+
 func TestCleanupUsesFilenameStampNotMtime(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "test.log")

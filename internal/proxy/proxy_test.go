@@ -387,6 +387,35 @@ func TestLineLimitedWriterReopensAfterRotation(t *testing.T) {
 	}
 }
 
+func TestLineLimitedWriterCloseClosesReopenedFile(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "test.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+
+	w := newLineLimitedWriter(f, logPath, 10)
+	if _, err := w.Write([]byte("before\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
+	if err := lr.ForceRotate(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if w.file != nil {
+		t.Fatal("expected writer to release the log fd")
+	}
+}
+
 func TestLineLimitedWriter_Basic(t *testing.T) {
 	tempDir := t.TempDir()
 	logPath := filepath.Join(tempDir, "test.log")

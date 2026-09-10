@@ -161,11 +161,13 @@ function _fetch_suggestions() {
     local scrollback_file_args=()
     [[ -n "$scrollback_file" ]] && scrollback_file_args=(--scrollback-file "$scrollback_file")
 
-    # Call the Go binary with proper arguments
-    SMART_SUGGESTION_ALIASES="$shell_aliases" \
-    SMART_SUGGESTION_COMMANDS="$available_commands" \
-    SMART_SUGGESTION_HISTORY="$shell_history" \
-    "$SMART_SUGGESTION_BINARY" \
+    # exec so $! is the Go binary, not a zsh wrapper. Ctrl-C can then
+    # cancel the actual API request.
+    export SMART_SUGGESTION_ALIASES="$shell_aliases"
+    export SMART_SUGGESTION_COMMANDS="$available_commands"
+    export SMART_SUGGESTION_HISTORY="$shell_history"
+
+    exec "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
         --input "$input" \
         --output - \
@@ -174,8 +176,6 @@ function _fetch_suggestions() {
         $debug_flag \
         $context_flag \
         2> "$error_file"
-
-    return $?
 }
 
 

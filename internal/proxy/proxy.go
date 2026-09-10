@@ -173,13 +173,13 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	if err != nil {
 		return fmt.Errorf("failed to open session log file: %w", err)
 	}
-	defer logFile.Close()
 
 	scrollbackLines := opts.ScrollbackLines
 	if scrollbackLines <= 0 {
 		scrollbackLines = 100
 	}
 	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, scrollbackLines)
+	defer limitedLogWriter.Close()
 
 	teeWriter := io.MultiWriter(stdout, limitedLogWriter)
 
@@ -317,6 +317,18 @@ func cleanupProcessLock(file *os.File, lockPath string) {
 	os.Remove(lockPath)
 }
 
+func sessionLockPathForLog(logPath string) string {
+	return strings.TrimSuffix(logPath, filepath.Ext(logPath)) + ".lock"
+}
+
+func staleIdleSessionLog(path string, cutoff time.Time) bool {
+	if isProcessRunning(sessionLockPathForLog(path)) {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.ModTime().Before(cutoff)
+}
+
 func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 	dir := filepath.Dir(baseLogPath)
 	base := filepath.Base(baseLogPath)
@@ -355,9 +367,15 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 			continue
 		}
 
-		if info.ModTime().Before(cutoff) {
-			os.Remove(fullPath)
+		if !info.ModTime().Before(cutoff) || isProcessRunning(sessionLockPathForLog(fullPath)) {
+			continue
 		}
+		_ = pkg.WithLogRotateLock(fullPath, func() error {
+			if staleIdleSessionLog(fullPath, cutoff) {
+				os.Remove(fullPath)
+			}
+			return nil
+		})
 	}
 
 	return nil
@@ -417,6 +435,17 @@ func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
 	}
 
 	return len(p), nil
+}
+
+func (w *lineLimitedWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
 }
 
 func (w *lineLimitedWriter) flush() error {
