@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -148,6 +149,46 @@ func TestLogRotator_Compression(t *testing.T) {
 		t.Errorf("expected 1 backup, got %d", len(backups))
 	} else if filepath.Ext(backups[0]) != ".gz" {
 		t.Errorf("expected backup to have .gz extension, got %s", filepath.Ext(backups[0]))
+	}
+}
+
+func TestRotateWaitsForPerLogLock(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(logRotateLockPath(logFile), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		lr := NewLogRotator(&LogRotateConfig{MaxSize: 1, MaxBackups: 5, MaxAge: 1, Compress: false})
+		done <- lr.CheckAndRotate(logFile)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("rotation finished while lock was held: %v", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("rotation did not proceed after lock was released")
 	}
 }
 

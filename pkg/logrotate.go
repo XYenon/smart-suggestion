@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -57,23 +58,19 @@ func (lr *LogRotator) CheckAndRotate(logFilePath string) error {
 	lr.mutex.Lock()
 	defer lr.mutex.Unlock()
 
-	// Check if file exists and get its size
-	fileInfo, err := os.Stat(logFilePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// File doesn't exist, no need to rotate
+	return withLogRotateLock(logFilePath, func() error {
+		fileInfo, err := os.Stat(logFilePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
+		}
+		if fileInfo.Size() < lr.config.MaxSize {
 			return nil
 		}
-		return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
-	}
-
-	// Check if rotation is needed
-	if fileInfo.Size() < lr.config.MaxSize {
-		return nil
-	}
-
-	// Perform rotation
-	return lr.rotateFile(logFilePath)
+		return lr.rotateFile(logFilePath)
+	})
 }
 
 // rotateFile performs the actual file rotation
@@ -167,6 +164,30 @@ func (lr *LogRotator) compressReader(src io.Reader, dstPath string) (err error) 
 
 func backupReservationPath(backupPath string) string {
 	return backupPath + ".reserving"
+}
+
+func logRotateLockPath(logFilePath string) string {
+	return logFilePath + ".rotate.lock"
+}
+
+// withLogRotateLock serializes rotate → compress → cleanup for one log
+// across processes. Leftover .reserving / .gz.tmp.* files are only removed
+// while this exclusive lock is held, so a live reservation cannot be deleted.
+func withLogRotateLock(logFilePath string, fn func() error) error {
+	lockPath := logRotateLockPath(logFilePath)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fn()
+		}
+		return fmt.Errorf("failed to open rotation lock %s: %w", lockPath, err)
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("failed to acquire rotation lock %s: %w", lockPath, err)
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	return fn()
 }
 
 func uniqueBackupPath(dir, name, ext string) (string, error) {
@@ -271,6 +292,9 @@ func findBackupFiles(dir, name, ext string) ([]string, error) {
 	return backups, nil
 }
 
+// cleanupStaleRotationFiles removes leftover reservation and gzip temp files.
+// It must only run while holding the per-log rotation lock, so matching files
+// belong to a previous crashed rotation of this log, not a live one.
 func cleanupStaleRotationFiles(dir, name, ext string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -353,15 +377,15 @@ func (lr *LogRotator) ForceRotate(logFilePath string) error {
 	lr.mutex.Lock()
 	defer lr.mutex.Unlock()
 
-	// Check if file exists
-	if _, err := os.Stat(logFilePath); err != nil {
-		if os.IsNotExist(err) {
-			return nil // File doesn't exist, nothing to rotate
+	return withLogRotateLock(logFilePath, func() error {
+		if _, err := os.Stat(logFilePath); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
 		}
-		return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
-	}
-
-	return lr.rotateFile(logFilePath)
+		return lr.rotateFile(logFilePath)
+	})
 }
 
 // GetBackupFiles returns a list of backup files for the given log file
