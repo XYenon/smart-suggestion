@@ -401,7 +401,69 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 		})
 	}
 
+	cleanupIdleLocks(dir, baseLogPath)
 	return nil
+}
+
+func cleanupIdleLocks(dir, baseLogPath string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		fullPath := filepath.Join(dir, name)
+		switch {
+		case strings.HasSuffix(name, ".rotate.lock"):
+			logPath := strings.TrimSuffix(fullPath, ".rotate.lock")
+			if exists, err := fileExists(logPath); err != nil || exists {
+				continue
+			}
+		case strings.HasSuffix(name, ".lock"):
+			logPath := sessionLogForLock(baseLogPath, fullPath)
+			if exists, err := fileExists(logPath); err != nil || exists {
+				continue
+			}
+		default:
+			continue
+		}
+		_ = pkg.RemoveIdleLock(fullPath)
+	}
+}
+
+func sessionLogForLock(baseLogPath, lockPath string) string {
+	baseLock := strings.TrimSuffix(baseLogPath, filepath.Ext(baseLogPath)) + ".lock"
+	if filepath.Clean(lockPath) == filepath.Clean(baseLock) {
+		return baseLogPath
+	}
+	sessionID := sessionIDFromLock(baseLock, lockPath)
+	return session.GetSessionBasedLogFile(baseLogPath, sessionID)
+}
+
+func sessionIDFromLock(baseLockPath, lockPath string) string {
+	base := filepath.Base(baseLockPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	lockBase := filepath.Base(lockPath)
+	prefix := name + "."
+	if !strings.HasPrefix(lockBase, prefix) || !strings.HasSuffix(lockBase, ext) {
+		return ""
+	}
+	return lockBase[len(prefix) : len(lockBase)-len(ext)]
+}
+
+func fileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 type lineLimitedWriter struct {

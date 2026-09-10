@@ -180,19 +180,18 @@ function _fetch_suggestions() {
 
 
 function _show_loading_animation() {
+    setopt localoptions localtraps
     local pid=$1
     local canceled_file=$2
     local interval=0.1
     local animation_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
     local i=1
 
-    cleanup() {
+    trap '
         kill $pid 2>/dev/null
-        # Clear the line and restore cursor
         tput -S <<<"cr el cnorm"
         touch "$canceled_file"
-    }
-    trap cleanup SIGINT EXIT
+    ' INT EXIT
 
     tput -S <<<"sc civis"
     while kill -0 $pid 2>/dev/null; do
@@ -211,7 +210,7 @@ function _show_loading_animation() {
 
     # Always clean up when the loop exits
     tput -S <<<"cr el cnorm"
-    trap - SIGINT EXIT
+    trap - INT EXIT
 }
 
 function _do_smart_suggestion() {
@@ -311,6 +310,7 @@ function _do_smart_suggestion() {
 }
 
 function _check_smart_suggestion_updates() {
+    setopt localoptions localtraps
     [[ -x "$SMART_SUGGESTION_BINARY" ]] || return 0
 
     # Validate interval is a positive integer

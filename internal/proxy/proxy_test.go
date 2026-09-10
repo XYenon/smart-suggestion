@@ -103,6 +103,56 @@ func TestSessionLockPathForLogExtensionless(t *testing.T) {
 	}
 }
 
+func TestCleanupIdleLocksRemovesOrphansAndKeepsLive(t *testing.T) {
+	tempDir := t.TempDir()
+	baseLog := filepath.Join(tempDir, "proxy.log")
+	if err := os.WriteFile(baseLog, []byte("live"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	orphanRotate := filepath.Join(tempDir, "proxy.old.log.rotate.lock")
+	orphanSession := filepath.Join(tempDir, "proxy.old.lock")
+	liveRotate := filepath.Join(tempDir, "proxy.log.rotate.lock")
+	if err := os.WriteFile(orphanRotate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(orphanSession, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(liveRotate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupIdleLocks(tempDir, baseLog)
+
+	if _, err := os.Stat(orphanRotate); !os.IsNotExist(err) {
+		t.Fatalf("orphan rotate lock was kept: %v", err)
+	}
+	if _, err := os.Stat(orphanSession); !os.IsNotExist(err) {
+		t.Fatalf("orphan session lock was kept: %v", err)
+	}
+	if _, err := os.Stat(liveRotate); err != nil {
+		t.Fatalf("rotate lock for existing log was removed: %v", err)
+	}
+}
+
+func TestCleanupIdleLocksLeavesHeldSessionLock(t *testing.T) {
+	tempDir := t.TempDir()
+	baseLog := filepath.Join(tempDir, "proxy.log")
+	sessionLog := session.GetSessionBasedLogFile(baseLog, "pts_1")
+	lockPath := sessionLockPathForLog(baseLog, sessionLog)
+	held, err := createProcessLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupProcessLock(held, lockPath)
+
+	cleanupIdleLocks(tempDir, baseLog)
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("held session lock was removed: %v", err)
+	}
+}
+
 func TestCleanupOldSessionLogsSkipsLiveExtensionlessSession(t *testing.T) {
 	tempDir := t.TempDir()
 	baseLog := filepath.Join(tempDir, "proxy")
