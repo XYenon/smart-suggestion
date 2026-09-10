@@ -2,9 +2,11 @@ package pkg
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -208,6 +210,99 @@ func TestLogRotator_BackupMatchingIgnoresUnrelatedFiles(t *testing.T) {
 	}
 	if len(backups) != 1 {
 		t.Fatalf("expected 1 backup, got %d (%v)", len(backups), backups)
+	}
+}
+
+func TestUniqueBackupPathSkipsCompressedSibling(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	timestamp := now.Format("20060102-150405")
+	gz := filepath.Join(tempDir, fmt.Sprintf("test-%s.log.gz", timestamp))
+	if err := os.WriteFile(gz, []byte("compressed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := uniqueBackupPathAt(tempDir, "test", ".log", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(tempDir, fmt.Sprintf("test-%s-1.log", timestamp))
+	if got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestUniqueBackupPathMoreThan100Candidates(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	timestamp := now.Format("20060102-150405")
+	for i := 0; i <= 100; i++ {
+		suffix := timestamp
+		if i > 0 {
+			suffix = fmt.Sprintf("%s-%d", timestamp, i)
+		}
+		path := filepath.Join(tempDir, fmt.Sprintf("test-%s.log", suffix))
+		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := uniqueBackupPathAt(tempDir, "test", ".log", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(tempDir, fmt.Sprintf("test-%s-101.log", timestamp))
+	if got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestUniqueBackupPathErrorWhenDirMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	_, err := uniqueBackupPathAt(missing, "test", ".log", time.Now())
+	if err == nil {
+		t.Fatal("expected error for missing backup directory")
+	}
+}
+
+func TestUniqueBackupPathReservesExclusively(t *testing.T) {
+	tempDir := t.TempDir()
+	now := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+	const n = 50
+
+	paths := make([]string, n)
+	errCh := make(chan error, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			p, err := uniqueBackupPathAt(tempDir, "test", ".log", now)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			paths[i] = p
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+
+	seen := make(map[string]struct{}, n)
+	for _, p := range paths {
+		if p == "" {
+			t.Fatal("empty reserved path")
+		}
+		if _, dup := seen[p]; dup {
+			t.Fatalf("duplicate reserved path %s", p)
+		}
+		seen[p] = struct{}{}
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("reserved file missing: %v", err)
+		}
 	}
 }
 

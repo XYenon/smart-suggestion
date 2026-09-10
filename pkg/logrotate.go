@@ -88,8 +88,10 @@ func (lr *LogRotator) rotateFile(logFilePath string) error {
 		return err
 	}
 
-	// Move current log file to backup
+	// Move current log file to backup. uniqueBackupPath already reserved
+	// backupPath with O_EXCL so this rename cannot collide with another name.
 	if err := os.Rename(logFilePath, backupPath); err != nil {
+		_ = os.Remove(backupPath)
 		return fmt.Errorf("failed to rename log file %s to %s: %w", logFilePath, backupPath, err)
 	}
 
@@ -142,29 +144,40 @@ func (lr *LogRotator) compressFile(srcPath, dstPath string) error {
 }
 
 func uniqueBackupPath(dir, name, ext string) (string, error) {
-	timestamp := time.Now().Format("20060102-150405")
-	for i := 0; i < 100; i++ {
+	return uniqueBackupPathAt(dir, name, ext, time.Now())
+}
+
+func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
+	timestamp := now.Format("20060102-150405")
+	for i := 0; ; i++ {
 		suffix := timestamp
 		if i > 0 {
 			suffix = fmt.Sprintf("%s-%d", timestamp, i)
 		}
 		candidate := filepath.Join(dir, fmt.Sprintf("%s-%s%s", name, suffix, ext))
-		inUse, err := fileExists(candidate)
+
+		// Reserve the name exclusively so a concurrent rotator cannot
+		// observe the same free path and os.Rename over it (TOCTOU).
+		f, err := os.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return "", fmt.Errorf("failed to reserve backup name %s: %w", candidate, err)
+		}
+		_ = f.Close()
+
+		inUse, err := fileExists(candidate + ".gz")
+		if err != nil {
+			_ = os.Remove(candidate)
 			return "", err
 		}
 		if inUse {
+			_ = os.Remove(candidate)
 			continue
 		}
-		inUse, err = fileExists(candidate + ".gz")
-		if err != nil {
-			return "", err
-		}
-		if !inUse {
-			return candidate, nil
-		}
+		return candidate, nil
 	}
-	return "", fmt.Errorf("failed to allocate unique backup name for %s-%s%s", name, timestamp, ext)
 }
 
 func fileExists(path string) (bool, error) {

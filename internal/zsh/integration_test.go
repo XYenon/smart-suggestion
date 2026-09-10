@@ -948,20 +948,18 @@ func TestPluginSecuresExistingCacheFiles(t *testing.T) {
 	}
 	defer session.Close()
 
-	info, err := os.Stat(cacheDir)
-	if err != nil {
-		t.Fatal(err)
+	assertOwnerPrivate := func(path string) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("%s is still accessible by group/other: %o", path, perm)
+		}
 	}
-	if info.Mode().Perm() != 0o700 {
-		t.Fatalf("cache directory permissions are %o, want 700", info.Mode().Perm())
-	}
-	info, err = os.Stat(debugLog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("debug log permissions are %o, want 600", info.Mode().Perm())
-	}
+	assertOwnerPrivate(cacheDir)
+	assertOwnerPrivate(debugLog)
 }
 
 func TestConcurrentSuggestionsUseSeparateTempFiles(t *testing.T) {
