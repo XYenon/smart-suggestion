@@ -109,7 +109,7 @@ zi update
 git clone https://github.com/XYenon/smart-suggestion ~/.config/smart-suggestion
 ```
 
-2. Build the Go binary (requires Go 1.21+):
+2. Build the Go binary (requires Go 1.26+):
 
 ```bash
 cd ~/.config/smart-suggestion

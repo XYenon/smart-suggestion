@@ -99,7 +99,7 @@ Before creating a release:
 ## Troubleshooting Releases
 
 ### Build Failures
-- Check Go version compatibility (requires 1.21+)
+- Check Go version compatibility (requires 1.26+)
 - Verify all dependencies are available
 - Check for platform-specific build issues
 
