@@ -313,6 +313,8 @@ function _do_smart_suggestion() {
 function _check_smart_suggestion_updates() {
     setopt localoptions localtraps
     [[ -x "$SMART_SUGGESTION_BINARY" ]] || return 0
+    zmodload zsh/system 2>/dev/null || return 0
+    zsystem supports flock || return 0
 
     # Validate interval is a positive integer
     if [[ ! "$SMART_SUGGESTION_UPDATE_INTERVAL" =~ ^[0-9]+$ ]] || (( SMART_SUGGESTION_UPDATE_INTERVAL <= 0 )); then
@@ -320,41 +322,38 @@ function _check_smart_suggestion_updates() {
     fi
 
     local update_file="${SMART_SUGGESTION_CACHE_DIR}/last_update_check"
-    local lockdir="${SMART_SUGGESTION_CACHE_DIR}/update_check.lock"
+    local lockfile="${SMART_SUGGESTION_CACHE_DIR}/update_check.lock"
     local current_time=$(date +%s)
     local update_interval=$((SMART_SUGGESTION_UPDATE_INTERVAL * 24 * 3600))
 
-    # Cheap lock using mkdir (atomic operation)
-    mkdir "$lockdir" 2>/dev/null || return 0
-    trap 'rmdir "$lockdir" 2>/dev/null' EXIT
+    # Recover leftover mkdir lock dirs from older plugin versions.
+    [[ -d "$lockfile" ]] && rmdir "$lockfile" 2>/dev/null
+    : >> "$lockfile" 2>/dev/null || return 0
 
-    # Check if we should check for updates
-    if [[ -f "$update_file" ]]; then
-        local last_check
-        last_check=$(<"$update_file" 2>/dev/null)
-        # Validate last_check is a number
-        if [[ "$last_check" =~ ^[0-9]+$ ]]; then
-            local time_diff=$((current_time - last_check))
-            if (( time_diff < update_interval )); then
-                rmdir "$lockdir" 2>/dev/null
-                trap - EXIT
-                return 0
+    local lock_fd
+    zsystem flock -t 0 -f lock_fd "$lockfile" || return 0
+    {
+        if [[ -f "$update_file" ]]; then
+            local last_check
+            last_check=$(<"$update_file" 2>/dev/null)
+            if [[ "$last_check" =~ ^[0-9]+$ ]]; then
+                local time_diff=$((current_time - last_check))
+                if (( time_diff < update_interval )); then
+                    return 0
+                fi
             fi
         fi
-    fi
 
-    # Update the last check time
-    print -r -- "$current_time" >| "$update_file" 2>/dev/null
+        print -r -- "$current_time" >| "$update_file" 2>/dev/null
 
-    # Check for updates in background, write flag file instead of printing
-    {
-        if "$SMART_SUGGESTION_BINARY" update --check-only >/dev/null 2>&1; then
-            : >| "${SMART_SUGGESTION_CACHE_DIR}/update_available"
-        fi
-    } &!
-
-    rmdir "$lockdir" 2>/dev/null
-    trap - EXIT
+        {
+            if "$SMART_SUGGESTION_BINARY" update --check-only >/dev/null 2>&1; then
+                : >| "${SMART_SUGGESTION_CACHE_DIR}/update_available"
+            fi
+        } &!
+    } always {
+        zsystem flock -u $lock_fd
+    }
 }
 
 function _smart_suggestion_update_notify() {

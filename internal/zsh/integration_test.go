@@ -962,6 +962,88 @@ func TestPluginSecuresExistingCacheFiles(t *testing.T) {
 	assertOwnerPrivate(debugLog)
 }
 
+func TestUpdateCheckRecoversStaleMkdirLock(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get wd: %v", err)
+	}
+	projectRoot, err := filepath.Abs(filepath.Join(cwd, "..", ".."))
+	if err != nil {
+		t.Fatalf("Failed to get project root: %v", err)
+	}
+	pluginPath := filepath.Join(projectRoot, "smart-suggestion.plugin.zsh")
+
+	tmpDir := t.TempDir()
+	cacheDir := filepath.Join(tmpDir, "cache")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(cacheDir, "update_check.lock")
+	if err := os.Mkdir(lockPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	mockBinPath := filepath.Join(tmpDir, "smart-suggestion-bin")
+	if err := os.WriteFile(mockBinPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	script := fmt.Sprintf(`
+export SMART_SUGGESTION_CACHE_DIR=%s
+export SMART_SUGGESTION_BINARY=%s
+export SMART_SUGGESTION_AUTO_UPDATE=true
+export SMART_SUGGESTION_UPDATE_INTERVAL=7
+export SMART_SUGGESTION_PROXY_MODE=false
+source %s
+if [[ -d "$SMART_SUGGESTION_CACHE_DIR/update_check.lock" ]]; then
+  echo LOCK_STILL_DIR
+elif [[ -f "$SMART_SUGGESTION_CACHE_DIR/update_check.lock" ]]; then
+  echo LOCK_IS_FILE
+else
+  echo LOCK_MISSING
+fi
+if [[ -f "$SMART_SUGGESTION_CACHE_DIR/last_update_check" ]]; then
+  echo UPDATE_CHECKED
+fi
+source %s
+echo SECOND_SOURCE_OK
+`, cacheDir, mockBinPath, pluginPath, pluginPath)
+
+	cmd := exec.Command("zsh", "-f", "-c", script)
+	cmd.Dir = projectRoot
+	cmd.Env = append(os.Environ(),
+		"ZDOTDIR="+tmpDir,
+		"HOME="+tmpDir,
+		"XDG_CACHE_HOME="+tmpDir,
+		"XDG_CONFIG_HOME="+tmpDir,
+		"OPENAI_API_KEY=fake-key",
+		"SMART_SUGGESTION_AI_PROVIDER=openai",
+		"SMART_SUGGESTION_BINARY="+mockBinPath,
+		"SMART_SUGGESTION_CACHE_DIR="+cacheDir,
+		"SMART_SUGGESTION_AUTO_UPDATE=true",
+		"SMART_SUGGESTION_PROXY_MODE=false",
+	)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Command failed with %v: %s", err, string(out))
+	}
+	output := string(out)
+	if !strings.Contains(output, "LOCK_IS_FILE") {
+		t.Errorf("stale mkdir lock was not recovered. Output:\n%s", output)
+	}
+	if !strings.Contains(output, "UPDATE_CHECKED") {
+		t.Errorf("update check did not run after recovering lock. Output:\n%s", output)
+	}
+	if !strings.Contains(output, "SECOND_SOURCE_OK") {
+		t.Errorf("second source after flock unlock failed. Output:\n%s", output)
+	}
+}
+
 func TestConcurrentSuggestionsUseSeparateTempFiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
