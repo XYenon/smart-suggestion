@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -150,6 +151,28 @@ func TestLogRotator_Compression(t *testing.T) {
 	}
 }
 
+func TestRotateRemovesReservationSidecar(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	lr := NewLogRotator(&LogRotateConfig{MaxSize: 1, MaxBackups: 5, MaxAge: 1, Compress: false})
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lr.CheckAndRotate(logFile); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".reserving") {
+			t.Fatalf("reservation sidecar left after rotate: %s", entry.Name())
+		}
+	}
+}
+
 func TestLogRotator_SameSecondBackupNames(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "test.log")
@@ -230,6 +253,7 @@ func TestUniqueBackupPathSkipsCompressedSibling(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
+	assertReservedBackupName(t, got)
 }
 
 func TestUniqueBackupPathMoreThan100Candidates(t *testing.T) {
@@ -255,6 +279,7 @@ func TestUniqueBackupPathMoreThan100Candidates(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
+	assertReservedBackupName(t, got)
 }
 
 func TestUniqueBackupPathErrorWhenDirMissing(t *testing.T) {
@@ -300,8 +325,85 @@ func TestUniqueBackupPathReservesExclusively(t *testing.T) {
 			t.Fatalf("duplicate reserved path %s", p)
 		}
 		seen[p] = struct{}{}
-		if _, err := os.Stat(p); err != nil {
-			t.Fatalf("reserved file missing: %v", err)
+		assertReservedBackupName(t, p)
+	}
+}
+
+func assertReservedBackupName(t *testing.T, backupPath string) {
+	t.Helper()
+	if _, err := os.Stat(backupPath); !os.IsNotExist(err) {
+		t.Fatalf("final backup path %s should not exist until rename: %v", backupPath, err)
+	}
+	if _, err := os.Stat(backupReservationPath(backupPath)); err != nil {
+		t.Fatalf("reservation sidecar missing for %s: %v", backupPath, err)
+	}
+}
+
+func TestCleanupIgnoresReservationSidecarsAndTempGzip(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	sidecar := filepath.Join(tempDir, "test-20260910-120000.log.reserving")
+	tmpGz := filepath.Join(tempDir, "test-20260910-120000.log.gz.tmp.1234")
+	if err := os.WriteFile(sidecar, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmpGz, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := NewLogRotator(&LogRotateConfig{MaxSize: 1, MaxBackups: 1, MaxAge: 1, Compress: false})
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lr.CheckAndRotate(logFile); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{sidecar, tmpGz} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("in-progress file %s was removed: %v", path, err)
+		}
+	}
+
+	backups, err := lr.GetBackupFiles(logFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected 1 real backup, got %d (%v)", len(backups), backups)
+	}
+	for _, path := range backups {
+		if path == sidecar || path == tmpGz {
+			t.Fatalf("in-progress file %s was treated as a backup", path)
+		}
+	}
+}
+
+type failReader struct{}
+
+func (failReader) Read([]byte) (int, error) {
+	return 0, fmt.Errorf("forced read failure")
+}
+
+func TestCompressFileFailureLeavesNoPartialGz(t *testing.T) {
+	tempDir := t.TempDir()
+	dst := filepath.Join(tempDir, "src.log.gz")
+
+	lr := NewLogRotator(nil)
+	if err := lr.compressReader(failReader{}, dst); err == nil {
+		t.Fatal("expected compression to fail")
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Fatalf("partial gzip file was left at %s: %v", dst, err)
+	}
+
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") {
+			t.Fatalf("temporary gzip file was left: %s", entry.Name())
 		}
 	}
 }

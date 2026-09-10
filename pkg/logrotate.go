@@ -88,12 +88,11 @@ func (lr *LogRotator) rotateFile(logFilePath string) error {
 		return err
 	}
 
-	// Move current log file to backup. uniqueBackupPath already reserved
-	// backupPath with O_EXCL so this rename cannot collide with another name.
 	if err := os.Rename(logFilePath, backupPath); err != nil {
-		_ = os.Remove(backupPath)
+		_ = os.Remove(backupReservationPath(backupPath))
 		return fmt.Errorf("failed to rename log file %s to %s: %w", logFilePath, backupPath, err)
 	}
+	_ = os.Remove(backupReservationPath(backupPath))
 
 	// Compress the backup file if enabled
 	if lr.config.Compress {
@@ -117,30 +116,55 @@ func (lr *LogRotator) rotateFile(logFilePath string) error {
 	return nil
 }
 
-// compressFile compresses the source file to the destination using gzip
-func (lr *LogRotator) compressFile(srcPath, dstPath string) error {
-	srcFile, err := os.Open(srcPath)
+// compressFile compresses the source file to the destination using gzip.
+// The destination is replaced only after a complete gzip stream is written,
+// so a failed compress cannot leave a partial .gz that cleanup would treat
+// as a real backup.
+func (lr *LogRotator) compressFile(srcPath, dstPath string) (err error) {
+	src, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
 	}
-	defer srcFile.Close()
+	defer src.Close()
+	return lr.compressReader(src, dstPath)
+}
 
-	dstFile, err := os.Create(dstPath)
+func (lr *LogRotator) compressReader(src io.Reader, dstPath string) (err error) {
+	tmpFile, err := os.CreateTemp(filepath.Dir(dstPath), filepath.Base(dstPath)+".tmp.")
 	if err != nil {
-		return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
+		return fmt.Errorf("failed to create temporary compressed file for %s: %w", dstPath, err)
 	}
-	defer dstFile.Close()
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		if err != nil {
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	gzipWriter := gzip.NewWriter(dstFile)
-	if _, err := io.Copy(gzipWriter, srcFile); err != nil {
+	gzipWriter := gzip.NewWriter(tmpFile)
+	if _, copyErr := io.Copy(gzipWriter, src); copyErr != nil {
 		_ = gzipWriter.Close()
-		return fmt.Errorf("failed to compress file: %w", err)
+		err = fmt.Errorf("failed to compress file: %w", copyErr)
+		return err
 	}
-	if err := gzipWriter.Close(); err != nil {
-		return fmt.Errorf("failed to close gzip writer for %s: %w", dstPath, err)
+	if closeErr := gzipWriter.Close(); closeErr != nil {
+		err = fmt.Errorf("failed to close gzip writer for %s: %w", dstPath, closeErr)
+		return err
 	}
-
+	if closeErr := tmpFile.Close(); closeErr != nil {
+		err = fmt.Errorf("failed to close temporary compressed file %s: %w", tmpPath, closeErr)
+		return err
+	}
+	if renameErr := os.Rename(tmpPath, dstPath); renameErr != nil {
+		err = fmt.Errorf("failed to finalize compressed file %s: %w", dstPath, renameErr)
+		return err
+	}
 	return nil
+}
+
+func backupReservationPath(backupPath string) string {
+	return backupPath + ".reserving"
 }
 
 func uniqueBackupPath(dir, name, ext string) (string, error) {
@@ -155,10 +179,12 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 			suffix = fmt.Sprintf("%s-%d", timestamp, i)
 		}
 		candidate := filepath.Join(dir, fmt.Sprintf("%s-%s%s", name, suffix, ext))
+		reservation := backupReservationPath(candidate)
 
-		// Reserve the name exclusively so a concurrent rotator cannot
-		// observe the same free path and os.Rename over it (TOCTOU).
-		f, err := os.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		// Claim the candidate with a sidecar. Using the final backup path
+		// itself would make findBackupFiles/cleanupOldBackups treat a
+		// zero-byte reservation as a real backup.
+		f, err := os.OpenFile(reservation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
 			if os.IsExist(err) {
 				continue
@@ -167,13 +193,20 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 		}
 		_ = f.Close()
 
-		inUse, err := fileExists(candidate + ".gz")
+		inUse, err := fileExists(candidate)
 		if err != nil {
-			_ = os.Remove(candidate)
+			_ = os.Remove(reservation)
 			return "", err
 		}
+		if !inUse {
+			inUse, err = fileExists(candidate + ".gz")
+			if err != nil {
+				_ = os.Remove(reservation)
+				return "", err
+			}
+		}
 		if inUse {
-			_ = os.Remove(candidate)
+			_ = os.Remove(reservation)
 			continue
 		}
 		return candidate, nil
