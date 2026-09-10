@@ -58,12 +58,9 @@ func (lr *LogRotator) CheckAndRotate(logFilePath string) error {
 	lr.mutex.Lock()
 	defer lr.mutex.Unlock()
 
-	return withLogRotateLock(logFilePath, func() error {
+	return lr.withLockedLog(logFilePath, func() error {
 		fileInfo, err := os.Stat(logFilePath)
 		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
 			return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
 		}
 		if fileInfo.Size() < lr.config.MaxSize {
@@ -142,22 +139,18 @@ func (lr *LogRotator) compressReader(src io.Reader, dstPath string) (err error) 
 	}()
 
 	gzipWriter := gzip.NewWriter(tmpFile)
-	if _, copyErr := io.Copy(gzipWriter, src); copyErr != nil {
+	if _, err = io.Copy(gzipWriter, src); err != nil {
 		_ = gzipWriter.Close()
-		err = fmt.Errorf("failed to compress file: %w", copyErr)
-		return err
+		return fmt.Errorf("failed to compress file: %w", err)
 	}
-	if closeErr := gzipWriter.Close(); closeErr != nil {
-		err = fmt.Errorf("failed to close gzip writer for %s: %w", dstPath, closeErr)
-		return err
+	if err = gzipWriter.Close(); err != nil {
+		return fmt.Errorf("failed to close gzip writer for %s: %w", dstPath, err)
 	}
-	if closeErr := tmpFile.Close(); closeErr != nil {
-		err = fmt.Errorf("failed to close temporary compressed file %s: %w", tmpPath, closeErr)
-		return err
+	if err = tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary compressed file %s: %w", tmpPath, err)
 	}
-	if renameErr := os.Rename(tmpPath, dstPath); renameErr != nil {
-		err = fmt.Errorf("failed to finalize compressed file %s: %w", dstPath, renameErr)
-		return err
+	if err = os.Rename(tmpPath, dstPath); err != nil {
+		return fmt.Errorf("failed to finalize compressed file %s: %w", dstPath, err)
 	}
 	return nil
 }
@@ -170,16 +163,36 @@ func logRotateLockPath(logFilePath string) string {
 	return logFilePath + ".rotate.lock"
 }
 
-// withLogRotateLock serializes rotate → compress → cleanup for one log
-// across processes. Leftover .reserving / .gz.tmp.* files are only removed
-// while this exclusive lock is held, so a live reservation cannot be deleted.
-func withLogRotateLock(logFilePath string, fn func() error) error {
+func (lr *LogRotator) withLockedLog(logFilePath string, fn func() error) error {
+	missing, err := logMissing(logFilePath)
+	if err != nil || missing {
+		return err
+	}
+	return WithLogRotateLock(logFilePath, func() error {
+		missing, err := logMissing(logFilePath)
+		if err != nil || missing {
+			return err
+		}
+		return fn()
+	})
+}
+
+func logMissing(logFilePath string) (bool, error) {
+	exists, err := fileExists(logFilePath)
+	if err != nil {
+		return false, fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
+	}
+	return !exists, nil
+}
+
+// WithLogRotateLock serializes rotate → compress → cleanup and live writers
+// for one log across processes. The proxy writer holds this lock around each
+// flush so it can reopen the log fd after a rename instead of writing to an
+// unlinked inode.
+func WithLogRotateLock(logFilePath string, fn func() error) error {
 	lockPath := logRotateLockPath(logFilePath)
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fn()
-		}
 		return fmt.Errorf("failed to open rotation lock %s: %w", lockPath, err)
 	}
 	defer f.Close()
@@ -216,17 +229,10 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 		}
 		_ = f.Close()
 
-		inUse, err := fileExists(candidate)
+		inUse, err := backupNameInUse(candidate)
 		if err != nil {
 			_ = os.Remove(reservation)
 			return "", err
-		}
-		if !inUse {
-			inUse, err = fileExists(candidate + ".gz")
-			if err != nil {
-				_ = os.Remove(reservation)
-				return "", err
-			}
 		}
 		if inUse {
 			_ = os.Remove(reservation)
@@ -234,6 +240,14 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 		}
 		return candidate, nil
 	}
+}
+
+func backupNameInUse(candidate string) (bool, error) {
+	inUse, err := fileExists(candidate)
+	if err != nil || inUse {
+		return inUse, err
+	}
+	return fileExists(candidate + ".gz")
 }
 
 func fileExists(path string) (bool, error) {
@@ -376,14 +390,7 @@ func (lr *LogRotator) cleanupOldBackups(logFilePath string) error {
 func (lr *LogRotator) ForceRotate(logFilePath string) error {
 	lr.mutex.Lock()
 	defer lr.mutex.Unlock()
-
-	return withLogRotateLock(logFilePath, func() error {
-		if _, err := os.Stat(logFilePath); err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return fmt.Errorf("failed to stat log file %s: %w", logFilePath, err)
-		}
+	return lr.withLockedLog(logFilePath, func() error {
 		return lr.rotateFile(logFilePath)
 	})
 }

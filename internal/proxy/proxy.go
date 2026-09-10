@@ -19,6 +19,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/pkg"
 	"golang.org/x/term"
 )
 
@@ -419,6 +420,13 @@ func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
 }
 
 func (w *lineLimitedWriter) flush() error {
+	return pkg.WithLogRotateLock(w.filePath, w.flushLocked)
+}
+
+func (w *lineLimitedWriter) flushLocked() error {
+	if err := w.reopenIfRotated(); err != nil {
+		return err
+	}
 	if err := w.file.Truncate(0); err != nil {
 		return err
 	}
@@ -436,4 +444,32 @@ func (w *lineLimitedWriter) flush() error {
 		}
 	}
 	return nil
+}
+
+func (w *lineLimitedWriter) reopenIfRotated() error {
+	info, err := os.Stat(w.filePath)
+	switch {
+	case err == nil && sameFile(w.file, info):
+		return nil
+	case err != nil && !os.IsNotExist(err):
+		return err
+	}
+
+	if w.file != nil {
+		_ = w.file.Close()
+	}
+	f, err := os.OpenFile(w.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to reopen session log file after rotation: %w", err)
+	}
+	w.file = f
+	return nil
+}
+
+func sameFile(f *os.File, info os.FileInfo) bool {
+	current, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return os.SameFile(current, info)
 }

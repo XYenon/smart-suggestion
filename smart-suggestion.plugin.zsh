@@ -220,7 +220,8 @@ function _do_smart_suggestion() {
     local canceled_file="${SMART_SUGGESTION_CACHE_DIR}/canceled.$$"
     local error_file="${SMART_SUGGESTION_CACHE_DIR}/error.$$"
     local out_file="${SMART_SUGGESTION_CACHE_DIR}/suggest.$$"
-    rm -f "$canceled_file" "$error_file" "$out_file"
+    local temp_files=("$canceled_file" "$error_file" "$out_file")
+    rm -f "${temp_files[@]}"
 
     local scrollback_file=""
 
@@ -263,7 +264,7 @@ function _do_smart_suggestion() {
 
     if [[ -f "$canceled_file" ]]; then
         _zsh_autosuggest_clear
-        rm -f "$canceled_file" "$error_file" "$out_file"
+        rm -f "${temp_files[@]}"
         return 1
     fi
 
@@ -278,7 +279,7 @@ function _do_smart_suggestion() {
         if [[ -s "$error_file" ]]; then
             error_msg=$(<"$error_file")
         fi
-        rm -f "$canceled_file" "$error_file" "$out_file"
+        rm -f "${temp_files[@]}"
         if [[ -z "${error_msg//[[:space:]]/}" ]]; then
             error_msg="No suggestion available at this time. Please try again later."
         fi
@@ -287,7 +288,7 @@ function _do_smart_suggestion() {
         print -r -u2 -- "$error_msg"
         return 1
     fi
-    rm -f "$canceled_file" "$error_file" "$out_file"
+    rm -f "${temp_files[@]}"
 
     ##### Process response
 

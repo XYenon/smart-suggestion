@@ -54,6 +54,9 @@ func TestLogRotator_CheckAndRotate(t *testing.T) {
 	if err := lr.CheckAndRotate(logFile); err != nil {
 		t.Errorf("unexpected error for non-existent file: %v", err)
 	}
+	if _, err := os.Stat(logRotateLockPath(logFile)); !os.IsNotExist(err) {
+		t.Fatalf("missing log should not create a rotation lock: %v", err)
+	}
 
 	// Case 2: File small
 	os.WriteFile(logFile, []byte("small"), 0644)
@@ -82,6 +85,18 @@ func TestLogRotator_CheckAndRotate(t *testing.T) {
 	}
 	if len(backups) != 1 {
 		t.Errorf("expected 1 backup, got %d", len(backups))
+	}
+}
+
+func TestForceRotateMissingFileDoesNotCreateLock(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "missing.log")
+	lr := NewLogRotator(&LogRotateConfig{MaxAge: 1})
+	if err := lr.ForceRotate(logFile); err != nil {
+		t.Fatalf("ForceRotate missing file: %v", err)
+	}
+	if _, err := os.Stat(logRotateLockPath(logFile)); !os.IsNotExist(err) {
+		t.Fatalf("missing log should not create a rotation lock: %v", err)
 	}
 }
 

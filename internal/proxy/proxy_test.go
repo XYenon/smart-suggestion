@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/pkg"
 )
 
 func TestIsProcessRunning(t *testing.T) {
@@ -328,6 +329,61 @@ func TestRunProxy_PTYError(t *testing.T) {
 	}, strings.NewReader(""), io.Discard)
 	if err == nil {
 		t.Error("expected error for non-existent shell, got nil")
+	}
+}
+
+func TestLineLimitedWriterReopensAfterRotation(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "test.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 10)
+	if _, err := w.Write([]byte("before\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
+	if err := lr.ForceRotate(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("expected original log to be renamed, got %v", err)
+	}
+
+	if _, err := w.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "after") {
+		t.Fatalf("reopened log missing new content: %q", got)
+	}
+	if !strings.Contains(got, "before") {
+		t.Fatalf("reopened log missing ring buffer: %q", got)
+	}
+
+	backups, err := lr.GetBackupFiles(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected 1 backup, got %d (%v)", len(backups), backups)
+	}
+	backup, err := os.ReadFile(backups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(backup), "before") {
+		t.Fatalf("backup missing pre-rotation content: %q", backup)
 	}
 }
 
