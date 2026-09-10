@@ -210,43 +210,6 @@ func withLogLock(logFilePath string, how int, fn func() error) error {
 	return fn()
 }
 
-// RemoveIdleLock unlinks lockPath only after acquiring an exclusive flock on
-// that inode and confirming the path still names it. A held lock is left
-// untouched, so this cannot replace a live flock inode.
-func RemoveIdleLock(lockPath string) error {
-	f, err := os.OpenFile(lockPath, os.O_RDWR, 0)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return nil
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-
-	fdInfo, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	pathInfo, err := os.Stat(lockPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if !os.SameFile(fdInfo, pathInfo) {
-		return nil
-	}
-	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
-}
-
 func uniqueBackupPath(dir, name, ext string) (string, error) {
 	return uniqueBackupPathAt(dir, name, ext, time.Now())
 }

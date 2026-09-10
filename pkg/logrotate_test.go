@@ -167,41 +167,6 @@ func TestLogRotator_Compression(t *testing.T) {
 	}
 }
 
-func TestRemoveIdleLockLeavesHeldLock(t *testing.T) {
-	tempDir := t.TempDir()
-	lockPath := filepath.Join(tempDir, "test.log.rotate.lock")
-	held, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer held.Close()
-	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Flock(int(held.Fd()), syscall.LOCK_UN)
-
-	if err := RemoveIdleLock(lockPath); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(lockPath); err != nil {
-		t.Fatalf("held lock was removed: %v", err)
-	}
-}
-
-func TestRemoveIdleLockRemovesUnlockedLock(t *testing.T) {
-	tempDir := t.TempDir()
-	lockPath := filepath.Join(tempDir, "test.log.rotate.lock")
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := RemoveIdleLock(lockPath); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("idle lock was kept: %v", err)
-	}
-}
-
 func TestRotateWaitsForPerLogLock(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "test.log")
