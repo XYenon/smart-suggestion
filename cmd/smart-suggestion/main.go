@@ -305,8 +305,13 @@ func buildRootCmd() *cobra.Command {
 
 	var rotateCmd = &cobra.Command{
 		Use:   "rotate-logs",
-		Short: "Rotate log files to prevent them from growing too large",
-		RunE:  runRotateLogs,
+		Short: "Rotate a log file (safe while the proxy is writing it)",
+		Long: `Rotate a log file.
+
+The rotator and the proxy writer share an exclusive per-log lock. A live
+proxy reopens its log fd after the file is renamed, so rotate-logs can be
+used on a session log that is still being written.`,
+		RunE: runRotateLogs,
 	}
 	rotateCmd.Flags().StringVarP(&proxyLogFile, "log-file", "l", "", "Log file path to rotate (required)")
 	rotateCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")

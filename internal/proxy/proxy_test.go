@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/pkg"
 )
 
 func TestIsProcessRunning(t *testing.T) {
@@ -51,8 +52,8 @@ func TestCleanupProcessLock(t *testing.T) {
 	f, _ := os.Create(lockPath)
 	cleanupProcessLock(f, lockPath)
 
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Error("expected lock file to be deleted")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Error("expected lock file to remain after unlock")
 	}
 }
 
@@ -89,6 +90,43 @@ func TestCreateProcessLock_InvalidDir(t *testing.T) {
 	_, err := createProcessLock(lockPath)
 	if err == nil {
 		t.Error("expected error for invalid directory, got nil")
+	}
+}
+
+func TestSessionLockPathForLogExtensionless(t *testing.T) {
+	base := filepath.Join("tmp", "proxy")
+	sessionLog := session.GetSessionBasedLogFile(base, "pts_1")
+	got := sessionLockPathForLog(base, sessionLog)
+	want := filepath.Join("tmp", "proxy.pts_1.lock")
+	if got != want {
+		t.Fatalf("got %q, want %q (session log %q)", got, want, sessionLog)
+	}
+}
+
+func TestCleanupOldSessionLogsSkipsLiveExtensionlessSession(t *testing.T) {
+	tempDir := t.TempDir()
+	baseLog := filepath.Join(tempDir, "proxy")
+	sessionLog := session.GetSessionBasedLogFile(baseLog, "pts_1")
+	if err := os.WriteFile(sessionLog, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(sessionLog, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	lockPath := sessionLockPathForLog(baseLog, sessionLog)
+	held, err := createProcessLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupProcessLock(held, lockPath)
+
+	if err := cleanupOldSessionLogs(baseLog, 24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(sessionLog); err != nil {
+		t.Fatalf("live extensionless session log was removed: %v", err)
 	}
 }
 
@@ -158,15 +196,12 @@ func TestProcessLock(t *testing.T) {
 		t.Error("expected error when creating duplicate lock, got nil")
 	}
 
-	// Cleanup
 	cleanupProcessLock(f, lockPath)
 
-	// Verify cleanup
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Errorf("expected lock file to be deleted, but it exists")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("expected lock file to remain after unlock: %v", err)
 	}
 
-	// Create again (should succeed)
 	f, err = createProcessLock(lockPath)
 	if err != nil {
 		t.Fatalf("failed to recreate lock: %v", err)
@@ -178,10 +213,13 @@ func TestCreateProcessLock_AlreadyRunning(t *testing.T) {
 	tempDir := t.TempDir()
 	lockPath := filepath.Join(tempDir, "running.lock")
 
-	// Create a lock file with current process PID
-	os.WriteFile(lockPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	held, err := createProcessLock(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupProcessLock(held, lockPath)
 
-	_, err := createProcessLock(lockPath)
+	_, err = createProcessLock(lockPath)
 	if err == nil || !strings.Contains(err.Error(), "another instance is already running") {
 		t.Errorf("expected already running error, got %v", err)
 	}
@@ -328,6 +366,90 @@ func TestRunProxy_PTYError(t *testing.T) {
 	}, strings.NewReader(""), io.Discard)
 	if err == nil {
 		t.Error("expected error for non-existent shell, got nil")
+	}
+}
+
+func TestLineLimitedWriterReopensAfterRotation(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "test.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+	defer f.Close()
+
+	w := newLineLimitedWriter(f, logPath, 10)
+	if _, err := w.Write([]byte("before\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
+	if err := lr.ForceRotate(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("expected original log to be renamed, got %v", err)
+	}
+
+	if _, err := w.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(content)
+	if !strings.Contains(got, "after") {
+		t.Fatalf("reopened log missing new content: %q", got)
+	}
+	if !strings.Contains(got, "before") {
+		t.Fatalf("reopened log missing ring buffer: %q", got)
+	}
+
+	backups, err := lr.GetBackupFiles(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backups) != 1 {
+		t.Fatalf("expected 1 backup, got %d (%v)", len(backups), backups)
+	}
+	backup, err := os.ReadFile(backups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(backup), "before") {
+		t.Fatalf("backup missing pre-rotation content: %q", backup)
+	}
+}
+
+func TestLineLimitedWriterCloseClosesReopenedFile(t *testing.T) {
+	tempDir := t.TempDir()
+	logPath := filepath.Join(tempDir, "test.log")
+
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		t.Fatalf("failed to create log file: %v", err)
+	}
+
+	w := newLineLimitedWriter(f, logPath, 10)
+	if _, err := w.Write([]byte("before\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
+	if err := lr.ForceRotate(logPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("after\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if w.file != nil {
+		t.Fatal("expected writer to release the log fd")
 	}
 }
 

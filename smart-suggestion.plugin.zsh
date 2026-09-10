@@ -51,10 +51,13 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
 fi
 
 : ${SMART_SUGGESTION_CACHE_DIR:="${XDG_CACHE_HOME:-$HOME/.cache}/smart-suggestion"}
-mkdir -p "$SMART_SUGGESTION_CACHE_DIR"
+export SMART_SUGGESTION_CACHE_DIR
+(umask 077; mkdir -p "$SMART_SUGGESTION_CACHE_DIR") || return 1
+chmod 700 "$SMART_SUGGESTION_CACHE_DIR" || return 1
 
 if [[ "$SMART_SUGGESTION_DEBUG" == 'true' ]]; then
-    touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log"
+    (umask 077; touch "${SMART_SUGGESTION_CACHE_DIR}/debug.log") || return 1
+    chmod 600 "${SMART_SUGGESTION_CACHE_DIR}/debug.log" || return 1
 fi
 
 # Detect binary path
@@ -139,6 +142,7 @@ function _smart_suggestion_shell_history() {
 
 function _fetch_suggestions() {
     local scrollback_file="$1"
+    local error_file="$2"
 
     # Source config file and export all variables
     _smart_suggestion_source_config
@@ -158,11 +162,13 @@ function _fetch_suggestions() {
     local scrollback_file_args=()
     [[ -n "$scrollback_file" ]] && scrollback_file_args=(--scrollback-file "$scrollback_file")
 
-    # Call the Go binary with proper arguments
-    SMART_SUGGESTION_ALIASES="$shell_aliases" \
-    SMART_SUGGESTION_COMMANDS="$available_commands" \
-    SMART_SUGGESTION_HISTORY="$shell_history" \
-    "$SMART_SUGGESTION_BINARY" \
+    # exec so $! is the Go binary, not a zsh wrapper. Ctrl-C can then
+    # cancel the actual API request.
+    export SMART_SUGGESTION_ALIASES="$shell_aliases"
+    export SMART_SUGGESTION_COMMANDS="$available_commands"
+    export SMART_SUGGESTION_HISTORY="$shell_history"
+
+    exec "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
         --input "$input" \
         --output - \
@@ -170,25 +176,23 @@ function _fetch_suggestions() {
         "${scrollback_file_args[@]}" \
         $debug_flag \
         $context_flag \
-        2> "${SMART_SUGGESTION_CACHE_DIR}/error"
-
-    return $?
+        2> "$error_file"
 }
 
 
 function _show_loading_animation() {
+    setopt localoptions localtraps
     local pid=$1
+    local canceled_file=$2
     local interval=0.1
     local animation_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
     local i=1
 
-    cleanup() {
+    trap '
         kill $pid 2>/dev/null
-        # Clear the line and restore cursor
         tput -S <<<"cr el cnorm"
-        touch "${SMART_SUGGESTION_CACHE_DIR}/canceled"
-    }
-    trap cleanup SIGINT EXIT
+        touch "$canceled_file"
+    ' INT EXIT
 
     tput -S <<<"sc civis"
     while kill -0 $pid 2>/dev/null; do
@@ -207,13 +211,17 @@ function _show_loading_animation() {
 
     # Always clean up when the loop exits
     tput -S <<<"cr el cnorm"
-    trap - SIGINT EXIT
+    trap - INT EXIT
 }
 
 function _do_smart_suggestion() {
     ##### Get input
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/canceled"
-    rm -f "${SMART_SUGGESTION_CACHE_DIR}/error"
+    setopt localoptions nomonitor
+    local canceled_file="${SMART_SUGGESTION_CACHE_DIR}/canceled.$$"
+    local error_file="${SMART_SUGGESTION_CACHE_DIR}/error.$$"
+    local out_file="${SMART_SUGGESTION_CACHE_DIR}/suggest.$$"
+    local temp_files=("$canceled_file" "$error_file" "$out_file")
+    rm -f "${temp_files[@]}"
 
     local scrollback_file=""
 
@@ -232,10 +240,13 @@ function _do_smart_suggestion() {
     _zsh_autosuggest_clear
 
     ##### Fetch message
-    exec {OUTPUT_FD}< <(_fetch_suggestions "$scrollback_file" & echo $!)
-    read pid <&$OUTPUT_FD
+    # Write the suggestion to a per-shell temp file so the worker PID is not
+    # mixed into stdout (numeric replies like "=42" were being read as the PID).
+    _fetch_suggestions "$scrollback_file" "$error_file" > "$out_file" &
+    local pid=$!
 
-    _show_loading_animation $pid
+    _show_loading_animation $pid "$canceled_file"
+    wait $pid 2>/dev/null
     local response_code=$?
 
     # Ensure cursor is visible and line is cleared after animation
@@ -251,21 +262,24 @@ function _do_smart_suggestion() {
         fi
     fi
 
-    if [[ -f "${SMART_SUGGESTION_CACHE_DIR}/canceled" ]]; then
+    if [[ -f "$canceled_file" ]]; then
         _zsh_autosuggest_clear
+        rm -f "${temp_files[@]}"
         return 1
     fi
 
-    local message
-    read -u $OUTPUT_FD -d '' message || true
-    exec {OUTPUT_FD}<&-
+    local message=""
+    if [[ -f "$out_file" ]]; then
+        read -r -d '' message < "$out_file" || true
+    fi
 
     if [[ -z "$message" ]]; then
         _zsh_autosuggest_clear
         local error_msg
-        if [[ -s "${SMART_SUGGESTION_CACHE_DIR}/error" ]]; then
-            error_msg=$(<"${SMART_SUGGESTION_CACHE_DIR}/error")
+        if [[ -s "$error_file" ]]; then
+            error_msg=$(<"$error_file")
         fi
+        rm -f "${temp_files[@]}"
         if [[ -z "${error_msg//[[:space:]]/}" ]]; then
             error_msg="No suggestion available at this time. Please try again later."
         fi
@@ -274,6 +288,7 @@ function _do_smart_suggestion() {
         print -r -u2 -- "$error_msg"
         return 1
     fi
+    rm -f "${temp_files[@]}"
 
     ##### Process response
 
@@ -296,7 +311,10 @@ function _do_smart_suggestion() {
 }
 
 function _check_smart_suggestion_updates() {
+    setopt localoptions localtraps
     [[ -x "$SMART_SUGGESTION_BINARY" ]] || return 0
+    zmodload zsh/system 2>/dev/null || return 0
+    zsystem supports flock || return 0
 
     # Validate interval is a positive integer
     if [[ ! "$SMART_SUGGESTION_UPDATE_INTERVAL" =~ ^[0-9]+$ ]] || (( SMART_SUGGESTION_UPDATE_INTERVAL <= 0 )); then
@@ -304,41 +322,35 @@ function _check_smart_suggestion_updates() {
     fi
 
     local update_file="${SMART_SUGGESTION_CACHE_DIR}/last_update_check"
-    local lockdir="${SMART_SUGGESTION_CACHE_DIR}/update_check.lock"
+    local lockfile="${SMART_SUGGESTION_CACHE_DIR}/update_check.lock"
     local current_time=$(date +%s)
     local update_interval=$((SMART_SUGGESTION_UPDATE_INTERVAL * 24 * 3600))
 
-    # Cheap lock using mkdir (atomic operation)
-    mkdir "$lockdir" 2>/dev/null || return 0
-    trap 'rmdir "$lockdir" 2>/dev/null' EXIT
+    # Recover leftover mkdir lock dirs from older plugin versions.
+    [[ -d "$lockfile" ]] && rmdir "$lockfile" 2>/dev/null
+    : >> "$lockfile" 2>/dev/null || return 0
 
-    # Check if we should check for updates
-    if [[ -f "$update_file" ]]; then
-        local last_check
-        last_check=$(<"$update_file" 2>/dev/null)
-        # Validate last_check is a number
-        if [[ "$last_check" =~ ^[0-9]+$ ]]; then
-            local time_diff=$((current_time - last_check))
-            if (( time_diff < update_interval )); then
-                rmdir "$lockdir" 2>/dev/null
-                trap - EXIT
+    local lock_fd
+    zsystem flock -t 0 -f lock_fd "$lockfile" || return 0
+    {
+        if [[ -f "$update_file" ]]; then
+            local last_check
+            last_check=$(<"$update_file" 2>/dev/null)
+            if [[ "$last_check" =~ ^[0-9]+$ ]] && (( current_time - last_check < update_interval )); then
                 return 0
             fi
         fi
-    fi
 
-    # Update the last check time
-    print -r -- "$current_time" >| "$update_file" 2>/dev/null
+        print -r -- "$current_time" >| "$update_file" 2>/dev/null
 
-    # Check for updates in background, write flag file instead of printing
-    {
-        if "$SMART_SUGGESTION_BINARY" update --check-only >/dev/null 2>&1; then
-            : >| "${SMART_SUGGESTION_CACHE_DIR}/update_available"
-        fi
-    } &!
-
-    rmdir "$lockdir" 2>/dev/null
-    trap - EXIT
+        {
+            if "$SMART_SUGGESTION_BINARY" update --check-only >/dev/null 2>&1; then
+                : >| "${SMART_SUGGESTION_CACHE_DIR}/update_available"
+            fi
+        } &!
+    } always {
+        zsystem flock -u $lock_fd
+    }
 }
 
 function _smart_suggestion_update_notify() {
@@ -362,6 +374,7 @@ function smart-suggestion() {
     echo "    - SMART_SUGGESTION_AUTO_UPDATE: Enable automatic update checking (default: true, value: $SMART_SUGGESTION_AUTO_UPDATE)."
     echo "    - SMART_SUGGESTION_UPDATE_INTERVAL: Days between update checks (default: 7, value: $SMART_SUGGESTION_UPDATE_INTERVAL)."
     echo "    - SMART_SUGGESTION_BINARY: Path to the smart-suggestion binary (value: $SMART_SUGGESTION_BINARY)."
+    echo "    - SMART_SUGGESTION_CACHE_DIR: Cache directory for logs and state (default: ~/.cache/smart-suggestion, value: $SMART_SUGGESTION_CACHE_DIR)."
 }
 
 zle -N _do_smart_suggestion

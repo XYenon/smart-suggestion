@@ -13,6 +13,7 @@ import (
 	"github.com/xyenon/smart-suggestion/internal/debug"
 	"github.com/xyenon/smart-suggestion/internal/paths"
 	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/pkg"
 )
 
 var (
@@ -280,6 +281,16 @@ func readLatestLines(content string, maxLines int) (string, error) {
 }
 
 func readLatestProxyContent(logFile string, maxLines int) (string, error) {
+	var content string
+	err := pkg.WithLogReadLock(logFile, func() error {
+		var err error
+		content, err = readLatestProxyContentUnlocked(logFile, maxLines)
+		return err
+	})
+	return content, err
+}
+
+func readLatestProxyContentUnlocked(logFile string, maxLines int) (string, error) {
 	file, err := os.Open(logFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to open proxy log file: %w", err)

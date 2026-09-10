@@ -8,6 +8,9 @@ import (
 const ProxyLogFilename = "proxy.log"
 
 func GetCacheDir() string {
+	if dir := os.Getenv("SMART_SUGGESTION_CACHE_DIR"); dir != "" {
+		return dir
+	}
 	cacheDir := os.Getenv("XDG_CACHE_HOME")
 	if cacheDir == "" {
 		homeDir, err := os.UserHomeDir()

@@ -19,6 +19,7 @@ import (
 	"github.com/creack/pty"
 	"github.com/xyenon/smart-suggestion/internal/debug"
 	"github.com/xyenon/smart-suggestion/internal/session"
+	"github.com/xyenon/smart-suggestion/pkg"
 	"golang.org/x/term"
 )
 
@@ -172,13 +173,13 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	if err != nil {
 		return fmt.Errorf("failed to open session log file: %w", err)
 	}
-	defer logFile.Close()
 
 	scrollbackLines := opts.ScrollbackLines
 	if scrollbackLines <= 0 {
 		scrollbackLines = 100
 	}
 	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, scrollbackLines)
+	defer limitedLogWriter.Close()
 
 	teeWriter := io.MultiWriter(stdout, limitedLogWriter)
 
@@ -249,38 +250,31 @@ func createProcessLock(lockPath string) (*os.File, error) {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
 
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		if os.IsExist(err) {
-			if isProcessRunning(lockPath) {
-				return nil, fmt.Errorf("another instance is already running")
-			}
-			os.Remove(lockPath)
-			file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create lock file: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to create lock file: %w", err)
-		}
+		return nil, fmt.Errorf("failed to create lock file: %w", err)
 	}
 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
-		os.Remove(lockPath)
-		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+		return nil, fmt.Errorf("another instance is already running")
 	}
 
-	pid := os.Getpid()
-	if _, err := file.WriteString(fmt.Sprintf("%d\n", pid)); err != nil {
-		file.Close()
-		os.Remove(lockPath)
+	if err := file.Truncate(0); err != nil {
+		cleanupProcessLock(file, lockPath)
+		return nil, fmt.Errorf("failed to truncate lock file: %w", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		cleanupProcessLock(file, lockPath)
+		return nil, fmt.Errorf("failed to rewind lock file: %w", err)
+	}
+
+	if _, err := file.WriteString(fmt.Sprintf("%d\n", os.Getpid())); err != nil {
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to write PID to lock file: %w", err)
 	}
-
 	if err := file.Sync(); err != nil {
-		file.Close()
-		os.Remove(lockPath)
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to sync lock file: %w", err)
 	}
 
@@ -313,7 +307,45 @@ func cleanupProcessLock(file *os.File, lockPath string) {
 		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()
 	}
-	os.Remove(lockPath)
+}
+
+func sessionLockPathForLog(baseLogPath, sessionLogPath string) string {
+	sessionID := sessionIDFromLog(baseLogPath, sessionLogPath)
+	baseLock := strings.TrimSuffix(baseLogPath, filepath.Ext(baseLogPath)) + ".lock"
+	return getSessionBasedLockFile(baseLock, sessionID)
+}
+
+func sessionIDFromLog(baseLogPath, sessionLogPath string) string {
+	base := filepath.Base(baseLogPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	sessionBase := filepath.Base(sessionLogPath)
+	prefix := name + "."
+	if !strings.HasPrefix(sessionBase, prefix) || !strings.HasSuffix(sessionBase, ext) {
+		return ""
+	}
+	return sessionBase[len(prefix) : len(sessionBase)-len(ext)]
+}
+
+func sessionLockHeld(lockPath string) bool {
+	file, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true
+	}
+	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	return false
+}
+
+func staleIdleSessionLog(baseLogPath, path string, cutoff time.Time) bool {
+	if sessionLockHeld(sessionLockPathForLog(baseLogPath, path)) {
+		return false
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.ModTime().Before(cutoff)
 }
 
 func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
@@ -344,7 +376,7 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 			continue
 		}
 
-		if filename == filepath.Base(baseLogPath) {
+		if filename == filepath.Base(baseLogPath) || strings.HasSuffix(filename, ".lock") {
 			continue
 		}
 
@@ -354,9 +386,15 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 			continue
 		}
 
-		if info.ModTime().Before(cutoff) {
-			os.Remove(fullPath)
+		if !info.ModTime().Before(cutoff) || sessionLockHeld(sessionLockPathForLog(baseLogPath, fullPath)) {
+			continue
 		}
+		_ = pkg.WithLogRotateLock(fullPath, func() error {
+			if staleIdleSessionLog(baseLogPath, fullPath, cutoff) {
+				os.Remove(fullPath)
+			}
+			return nil
+		})
 	}
 
 	return nil
@@ -418,7 +456,25 @@ func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
+func (w *lineLimitedWriter) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return nil
+	}
+	err := w.file.Close()
+	w.file = nil
+	return err
+}
+
 func (w *lineLimitedWriter) flush() error {
+	return pkg.WithLogRotateLock(w.filePath, w.flushLocked)
+}
+
+func (w *lineLimitedWriter) flushLocked() error {
+	if err := w.reopenIfRotated(); err != nil {
+		return err
+	}
 	if err := w.file.Truncate(0); err != nil {
 		return err
 	}
@@ -435,5 +491,28 @@ func (w *lineLimitedWriter) flush() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (w *lineLimitedWriter) reopenIfRotated() error {
+	info, err := os.Stat(w.filePath)
+	switch {
+	case err == nil:
+		current, statErr := w.file.Stat()
+		if statErr == nil && os.SameFile(current, info) {
+			return nil
+		}
+	case !os.IsNotExist(err):
+		return err
+	}
+
+	if w.file != nil {
+		_ = w.file.Close()
+	}
+	f, err := os.OpenFile(w.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to reopen session log file after rotation: %w", err)
+	}
+	w.file = f
 	return nil
 }

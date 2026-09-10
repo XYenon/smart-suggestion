@@ -8,19 +8,26 @@ import (
 	"testing"
 )
 
-func TestLog(t *testing.T) {
-	// Create a temp dir for cache
-	tempDir := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", tempDir)
-
-	// Reset state
+func resetLoggerForTest(t *testing.T) {
+	t.Helper()
+	Close()
 	mu.Lock()
 	enabled = false
 	logFile = nil
 	logger = nil
-	initOnce = *new(sync.Once) // Reset sync.Once
+	initOnce = sync.Once{}
 	initError = nil
 	mu.Unlock()
+	t.Cleanup(Close)
+}
+
+func TestLog(t *testing.T) {
+	// Create a temp dir for cache
+	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", tempDir)
+
+	resetLoggerForTest(t)
 
 	// Enable logging
 	Enable(true)
@@ -52,12 +59,12 @@ func TestLog(t *testing.T) {
 	if entry["key"] != "value" {
 		t.Errorf("expected data key 'value', got %v", entry["key"])
 	}
-
-	// Clean up
-	Close()
 }
 
 func TestClose(t *testing.T) {
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	resetLoggerForTest(t)
 	Enable(true)
 	Log("message", nil)
 	Close()
@@ -70,6 +77,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestEnableFalse(t *testing.T) {
+	resetLoggerForTest(t)
 	Enable(false)
 	if Enabled() {
 		t.Error("expected debug to be disabled")
@@ -79,20 +87,14 @@ func TestEnableFalse(t *testing.T) {
 
 func TestInitError(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", tempDir)
 
 	// Create a file where the directory should be
 	cacheDir := filepath.Join(tempDir, "smart-suggestion")
 	os.WriteFile(cacheDir, []byte("not a directory"), 0644)
 
-	// Reset state
-	mu.Lock()
-	enabled = false
-	logFile = nil
-	logger = nil
-	initOnce = *new(sync.Once)
-	initError = nil
-	mu.Unlock()
+	resetLoggerForTest(t)
 
 	Enable(true)
 	Log("test", nil)
@@ -101,4 +103,43 @@ func TestInitError(t *testing.T) {
 		// Log should detect initError and disable logging
 		t.Error("expected debug to be disabled after init error")
 	}
+}
+
+func TestExistingCacheIsMadePrivate(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", tempDir)
+
+	dir := filepath.Join(tempDir, "smart-suggestion")
+	logPath := filepath.Join(dir, "debug.log")
+	if err := os.Mkdir(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	// Force group/other access in case the process umask already masked it.
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte("old"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(logPath, 0o666); err != nil {
+		t.Fatal(err)
+	}
+
+	resetLoggerForTest(t)
+	Enable(true)
+	Log("perm check", nil)
+
+	assertOwnerPrivate := func(path string) {
+		t.Helper()
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o077 != 0 {
+			t.Fatalf("%s is still accessible by group/other: %o", path, perm)
+		}
+	}
+	assertOwnerPrivate(dir)
+	assertOwnerPrivate(logPath)
 }

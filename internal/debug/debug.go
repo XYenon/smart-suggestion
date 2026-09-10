@@ -38,14 +38,24 @@ func Enabled() bool {
 
 func initLogger() {
 	logFilePath := filepath.Join(paths.GetCacheDir(), "debug.log")
-	if err := os.MkdirAll(filepath.Dir(logFilePath), 0755); err != nil {
+	cacheDir := filepath.Dir(logFilePath)
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
 		initError = fmt.Errorf("failed to create cache directory: %w", err)
 		return
 	}
+	if err := os.Chmod(cacheDir, 0o700); err != nil {
+		initError = fmt.Errorf("failed to secure cache directory: %w", err)
+		return
+	}
 
-	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		initError = fmt.Errorf("failed to open debug log file: %w", err)
+		return
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		initError = fmt.Errorf("failed to secure debug log file: %w", err)
 		return
 	}
 
