@@ -339,7 +339,7 @@ func assertReservedBackupName(t *testing.T, backupPath string) {
 	}
 }
 
-func TestCleanupIgnoresReservationSidecarsAndTempGzip(t *testing.T) {
+func TestCleanupRemovesStaleReservationAndTempGzip(t *testing.T) {
 	tempDir := t.TempDir()
 	logFile := filepath.Join(tempDir, "test.log")
 	sidecar := filepath.Join(tempDir, "test-20260910-120000.log.reserving")
@@ -360,8 +360,8 @@ func TestCleanupIgnoresReservationSidecarsAndTempGzip(t *testing.T) {
 	}
 
 	for _, path := range []string{sidecar, tmpGz} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("in-progress file %s was removed: %v", path, err)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("stale rotation file %s was not removed: %v", path, err)
 		}
 	}
 
@@ -372,10 +372,29 @@ func TestCleanupIgnoresReservationSidecarsAndTempGzip(t *testing.T) {
 	if len(backups) != 1 {
 		t.Fatalf("expected 1 real backup, got %d (%v)", len(backups), backups)
 	}
-	for _, path := range backups {
-		if path == sidecar || path == tmpGz {
-			t.Fatalf("in-progress file %s was treated as a backup", path)
-		}
+}
+
+func TestCleanupUsesFilenameStampNotMtime(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := filepath.Join(tempDir, "test.log")
+	oldBackup := filepath.Join(tempDir, "test-20200101-000000.log")
+	if err := os.WriteFile(oldBackup, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(oldBackup, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	lr := NewLogRotator(&LogRotateConfig{MaxSize: 1, MaxBackups: 5, MaxAge: 1, Compress: false})
+	if err := os.WriteFile(logFile, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := lr.CheckAndRotate(logFile); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(oldBackup); !os.IsNotExist(err) {
+		t.Fatalf("backup with old rotation stamp was kept despite recent mtime: %v", err)
 	}
 }
 

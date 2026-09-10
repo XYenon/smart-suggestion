@@ -130,6 +130,8 @@ func (lr *LogRotator) compressFile(srcPath, dstPath string) (err error) {
 }
 
 func (lr *LogRotator) compressReader(src io.Reader, dstPath string) (err error) {
+	// Create the temp file in the destination directory so the final rename
+	// stays on the same filesystem and cannot fail with EXDEV.
 	tmpFile, err := os.CreateTemp(filepath.Dir(dstPath), filepath.Base(dstPath)+".tmp.")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary compressed file for %s: %w", dstPath, err)
@@ -224,6 +226,32 @@ func fileExists(path string) (bool, error) {
 	return false, err
 }
 
+func backupFilePattern(name, ext string) *regexp.Regexp {
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `-([0-9]{8}-[0-9]{6})(?:-([1-9][0-9]*))?` + regexp.QuoteMeta(ext) + `(?:\.gz)?$`)
+}
+
+func rotationTempFilePattern(name, ext string) *regexp.Regexp {
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `-[0-9]{8}-[0-9]{6}(?:-[1-9][0-9]*)?` + regexp.QuoteMeta(ext) + `(?:\.reserving|\.gz\.tmp\..+)$`)
+}
+
+func parseBackupStamp(filename, name, ext string) (stamp time.Time, seq int, ok bool) {
+	m := backupFilePattern(name, ext).FindStringSubmatch(filename)
+	if m == nil {
+		return time.Time{}, 0, false
+	}
+	stamp, err := time.ParseInLocation("20060102-150405", m[1], time.Local)
+	if err != nil {
+		return time.Time{}, 0, false
+	}
+	if m[2] != "" {
+		seq, err = strconv.Atoi(m[2])
+		if err != nil {
+			return time.Time{}, 0, false
+		}
+	}
+	return stamp, seq, true
+}
+
 func findBackupFiles(dir, name, ext string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -233,7 +261,7 @@ func findBackupFiles(dir, name, ext string) ([]string, error) {
 		return nil, fmt.Errorf("failed to read backup directory %s: %w", dir, err)
 	}
 
-	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(name) + `-[0-9]{8}-[0-9]{6}(-[1-9][0-9]*)?` + regexp.QuoteMeta(ext) + `(\.gz)?$`)
+	pattern := backupFilePattern(name, ext)
 	backups := make([]string, 0)
 	for _, entry := range entries {
 		if !entry.IsDir() && pattern.MatchString(entry.Name()) {
@@ -243,6 +271,20 @@ func findBackupFiles(dir, name, ext string) ([]string, error) {
 	return backups, nil
 }
 
+func cleanupStaleRotationFiles(dir, name, ext string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	pattern := rotationTempFilePattern(name, ext)
+	for _, entry := range entries {
+		if entry.IsDir() || !pattern.MatchString(entry.Name()) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, entry.Name()))
+	}
+}
+
 // cleanupOldBackups removes old backup files based on MaxBackups and MaxAge settings
 func (lr *LogRotator) cleanupOldBackups(logFilePath string) error {
 	dir := filepath.Dir(logFilePath)
@@ -250,46 +292,50 @@ func (lr *LogRotator) cleanupOldBackups(logFilePath string) error {
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 
+	cleanupStaleRotationFiles(dir, name, ext)
+
 	matches, err := findBackupFiles(dir, name, ext)
 	if err != nil {
 		return fmt.Errorf("failed to find backup files for %s: %w", logFilePath, err)
 	}
 
-	// Create a list of backup files with their info
 	type backupFile struct {
-		path    string
-		modTime time.Time
+		path string
+		when time.Time
+		seq  int
 	}
 
 	var backups []backupFile
 	cutoffTime := time.Now().AddDate(0, 0, -lr.config.MaxAge)
 
 	for _, match := range matches {
-		// Skip the current log file
 		if match == logFilePath {
 			continue
 		}
 
-		fileInfo, err := os.Stat(match)
-		if err != nil {
+		stamp, seq, ok := parseBackupStamp(filepath.Base(match), name, ext)
+		if !ok {
 			continue
 		}
 
-		// Remove files older than MaxAge
-		if fileInfo.ModTime().Before(cutoffTime) {
+		if stamp.Before(cutoffTime) {
 			os.Remove(match)
 			continue
 		}
 
 		backups = append(backups, backupFile{
-			path:    match,
-			modTime: fileInfo.ModTime(),
+			path: match,
+			when: stamp,
+			seq:  seq,
 		})
 	}
 
-	// Sort by modification time (newest first)
+	// Newest rotation first. Same-second backups use the numeric suffix.
 	sort.Slice(backups, func(i, j int) bool {
-		return backups[i].modTime.After(backups[j].modTime)
+		if backups[i].when.Equal(backups[j].when) {
+			return backups[i].seq > backups[j].seq
+		}
+		return backups[i].when.After(backups[j].when)
 	})
 
 	// Remove excess backup files
