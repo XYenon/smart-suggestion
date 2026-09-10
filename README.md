@@ -215,6 +215,7 @@ Alternatively, you can configure the plugin using global environment variables i
 | `SMART_SUGGESTION_AUTO_UPDATE`       | Enable automatic update checking      | `true`                                  | `true`, `false`                                         |
 | `SMART_SUGGESTION_UPDATE_INTERVAL`   | Days between update checks            | `7`                                     | Any positive integer                                    |
 | `SMART_SUGGESTION_BINARY`            | Path to the `smart-suggestion` binary | Auto-detected                           | Any valid filepath to a valid `smart-suggestion` binary |
+| `SMART_SUGGESTION_CACHE_DIR`         | Cache directory for logs and state    | `~/.cache/smart-suggestion`             | Any valid directory path                                |
 
 If `SMART_SUGGESTION_BINARY` is not specified, we look for one in the following locations:
 

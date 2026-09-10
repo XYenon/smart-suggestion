@@ -115,6 +115,7 @@ Key variables:
 - `SMART_SUGGESTION_KEY`: Trigger key (default `^o`).
 - `SMART_SUGGESTION_PROXY_MODE`: `true`/`false`. Enables the PTY wrapper for better context.
 - `SMART_SUGGESTION_DEBUG`: Enable debug logging to `~/.cache/smart-suggestion/debug.log`.
+- `SMART_SUGGESTION_CACHE_DIR`: Cache directory used by both the plugin and the Go binary (default `~/.cache/smart-suggestion`).
 
 # Development Conventions
 

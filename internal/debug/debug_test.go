@@ -24,6 +24,7 @@ func resetLoggerForTest(t *testing.T) {
 func TestLog(t *testing.T) {
 	// Create a temp dir for cache
 	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", tempDir)
 
 	resetLoggerForTest(t)
@@ -61,6 +62,7 @@ func TestLog(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	resetLoggerForTest(t)
 	Enable(true)
@@ -85,6 +87,7 @@ func TestEnableFalse(t *testing.T) {
 
 func TestInitError(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", tempDir)
 
 	// Create a file where the directory should be
@@ -104,6 +107,7 @@ func TestInitError(t *testing.T) {
 
 func TestExistingCacheIsMadePrivate(t *testing.T) {
 	tempDir := t.TempDir()
+	t.Setenv("SMART_SUGGESTION_CACHE_DIR", "")
 	t.Setenv("XDG_CACHE_HOME", tempDir)
 
 	dir := filepath.Join(tempDir, "smart-suggestion")

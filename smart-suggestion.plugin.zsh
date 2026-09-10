@@ -51,6 +51,7 @@ if [[ -z "$SMART_SUGGESTION_AI_PROVIDER" ]]; then
 fi
 
 : ${SMART_SUGGESTION_CACHE_DIR:="${XDG_CACHE_HOME:-$HOME/.cache}/smart-suggestion"}
+export SMART_SUGGESTION_CACHE_DIR
 (umask 077; mkdir -p "$SMART_SUGGESTION_CACHE_DIR") || return 1
 chmod 700 "$SMART_SUGGESTION_CACHE_DIR" || return 1
 
@@ -377,6 +378,7 @@ function smart-suggestion() {
     echo "    - SMART_SUGGESTION_AUTO_UPDATE: Enable automatic update checking (default: true, value: $SMART_SUGGESTION_AUTO_UPDATE)."
     echo "    - SMART_SUGGESTION_UPDATE_INTERVAL: Days between update checks (default: 7, value: $SMART_SUGGESTION_UPDATE_INTERVAL)."
     echo "    - SMART_SUGGESTION_BINARY: Path to the smart-suggestion binary (value: $SMART_SUGGESTION_BINARY)."
+    echo "    - SMART_SUGGESTION_CACHE_DIR: Cache directory for logs and state (default: ~/.cache/smart-suggestion, value: $SMART_SUGGESTION_CACHE_DIR)."
 }
 
 zle -N _do_smart_suggestion
