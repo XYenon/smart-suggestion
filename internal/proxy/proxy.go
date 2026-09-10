@@ -261,24 +261,20 @@ func createProcessLock(lockPath string) (*os.File, error) {
 	}
 
 	if err := file.Truncate(0); err != nil {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to truncate lock file: %w", err)
 	}
 	if _, err := file.Seek(0, 0); err != nil {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to rewind lock file: %w", err)
 	}
 
 	if _, err := file.WriteString(fmt.Sprintf("%d\n", os.Getpid())); err != nil {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to write PID to lock file: %w", err)
 	}
 	if err := file.Sync(); err != nil {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
+		cleanupProcessLock(file, lockPath)
 		return nil, fmt.Errorf("failed to sync lock file: %w", err)
 	}
 
@@ -501,9 +497,12 @@ func (w *lineLimitedWriter) flushLocked() error {
 func (w *lineLimitedWriter) reopenIfRotated() error {
 	info, err := os.Stat(w.filePath)
 	switch {
-	case err == nil && sameFile(w.file, info):
-		return nil
-	case err != nil && !os.IsNotExist(err):
+	case err == nil:
+		current, statErr := w.file.Stat()
+		if statErr == nil && os.SameFile(current, info) {
+			return nil
+		}
+	case !os.IsNotExist(err):
 		return err
 	}
 
@@ -516,12 +515,4 @@ func (w *lineLimitedWriter) reopenIfRotated() error {
 	}
 	w.file = f
 	return nil
-}
-
-func sameFile(f *os.File, info os.FileInfo) bool {
-	current, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return os.SameFile(current, info)
 }

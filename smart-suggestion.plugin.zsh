@@ -336,11 +336,8 @@ function _check_smart_suggestion_updates() {
         if [[ -f "$update_file" ]]; then
             local last_check
             last_check=$(<"$update_file" 2>/dev/null)
-            if [[ "$last_check" =~ ^[0-9]+$ ]]; then
-                local time_diff=$((current_time - last_check))
-                if (( time_diff < update_interval )); then
-                    return 0
-                fi
+            if [[ "$last_check" =~ ^[0-9]+$ ]] && (( current_time - last_check < update_interval )); then
+                return 0
             fi
         fi
 

@@ -993,11 +993,6 @@ func TestUpdateCheckRecoversStaleMkdirLock(t *testing.T) {
 	}
 
 	script := fmt.Sprintf(`
-export SMART_SUGGESTION_CACHE_DIR=%s
-export SMART_SUGGESTION_BINARY=%s
-export SMART_SUGGESTION_AUTO_UPDATE=true
-export SMART_SUGGESTION_UPDATE_INTERVAL=7
-export SMART_SUGGESTION_PROXY_MODE=false
 source %s
 if [[ -d "$SMART_SUGGESTION_CACHE_DIR/update_check.lock" ]]; then
   echo LOCK_STILL_DIR
@@ -1011,7 +1006,7 @@ if [[ -f "$SMART_SUGGESTION_CACHE_DIR/last_update_check" ]]; then
 fi
 source %s
 echo SECOND_SOURCE_OK
-`, cacheDir, mockBinPath, pluginPath, pluginPath)
+`, pluginPath, pluginPath)
 
 	cmd := exec.Command("zsh", "-f", "-c", script)
 	cmd.Dir = projectRoot

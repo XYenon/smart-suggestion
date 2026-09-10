@@ -228,37 +228,35 @@ func uniqueBackupPathAt(dir, name, ext string, now time.Time) (string, error) {
 		// itself would make findBackupFiles/cleanupOldBackups treat a
 		// zero-byte reservation as a real backup.
 		f, err := os.OpenFile(reservation, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if os.IsExist(err) {
+			continue
+		}
 		if err != nil {
-			if os.IsExist(err) {
-				continue
-			}
 			return "", fmt.Errorf("failed to reserve backup name %s: %w", candidate, err)
 		}
 		_ = f.Close()
 
 		inUse, err := backupNameInUse(candidate)
-		if err != nil || inUse {
+		if err != nil {
 			_ = os.Remove(reservation)
-			if err != nil {
-				return "", err
-			}
+			return "", err
+		}
+		if inUse {
+			_ = os.Remove(reservation)
 			continue
 		}
 		return candidate, nil
 	}
 }
 
-func preferCompressedBackup(paths []string) string {
+func keepOneBackup(paths []string) string {
+	kept := paths[0]
 	for _, path := range paths {
 		if strings.HasSuffix(path, ".gz") {
-			return path
+			kept = path
+			break
 		}
 	}
-	return paths[0]
-}
-
-func keepOneBackup(paths []string) string {
-	kept := preferCompressedBackup(paths)
 	for _, path := range paths {
 		if path != kept {
 			os.Remove(path)
