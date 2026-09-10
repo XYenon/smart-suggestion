@@ -250,38 +250,35 @@ func createProcessLock(lockPath string) (*os.File, error) {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
 
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		if os.IsExist(err) {
-			if isProcessRunning(lockPath) {
-				return nil, fmt.Errorf("another instance is already running")
-			}
-			os.Remove(lockPath)
-			file, err = os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0644)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create lock file: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("failed to create lock file: %w", err)
-		}
+		return nil, fmt.Errorf("failed to create lock file: %w", err)
 	}
 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		file.Close()
-		os.Remove(lockPath)
-		return nil, fmt.Errorf("failed to acquire lock: %w", err)
+		return nil, fmt.Errorf("another instance is already running")
 	}
 
-	pid := os.Getpid()
-	if _, err := file.WriteString(fmt.Sprintf("%d\n", pid)); err != nil {
+	if err := file.Truncate(0); err != nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()
-		os.Remove(lockPath)
+		return nil, fmt.Errorf("failed to truncate lock file: %w", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
+		return nil, fmt.Errorf("failed to rewind lock file: %w", err)
+	}
+
+	if _, err := file.WriteString(fmt.Sprintf("%d\n", os.Getpid())); err != nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		file.Close()
 		return nil, fmt.Errorf("failed to write PID to lock file: %w", err)
 	}
-
 	if err := file.Sync(); err != nil {
+		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()
-		os.Remove(lockPath)
 		return nil, fmt.Errorf("failed to sync lock file: %w", err)
 	}
 
@@ -314,15 +311,41 @@ func cleanupProcessLock(file *os.File, lockPath string) {
 		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		file.Close()
 	}
-	os.Remove(lockPath)
 }
 
-func sessionLockPathForLog(logPath string) string {
-	return strings.TrimSuffix(logPath, filepath.Ext(logPath)) + ".lock"
+func sessionLockPathForLog(baseLogPath, sessionLogPath string) string {
+	sessionID := sessionIDFromLog(baseLogPath, sessionLogPath)
+	baseLock := strings.TrimSuffix(baseLogPath, filepath.Ext(baseLogPath)) + ".lock"
+	return getSessionBasedLockFile(baseLock, sessionID)
 }
 
-func staleIdleSessionLog(path string, cutoff time.Time) bool {
-	if isProcessRunning(sessionLockPathForLog(path)) {
+func sessionIDFromLog(baseLogPath, sessionLogPath string) string {
+	base := filepath.Base(baseLogPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	sessionBase := filepath.Base(sessionLogPath)
+	prefix := name + "."
+	if !strings.HasPrefix(sessionBase, prefix) || !strings.HasSuffix(sessionBase, ext) {
+		return ""
+	}
+	return sessionBase[len(prefix) : len(sessionBase)-len(ext)]
+}
+
+func sessionLockHeld(lockPath string) bool {
+	file, err := os.OpenFile(lockPath, os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return true
+	}
+	_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	return false
+}
+
+func staleIdleSessionLog(baseLogPath, path string, cutoff time.Time) bool {
+	if sessionLockHeld(sessionLockPathForLog(baseLogPath, path)) {
 		return false
 	}
 	info, err := os.Stat(path)
@@ -357,7 +380,7 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 			continue
 		}
 
-		if filename == filepath.Base(baseLogPath) {
+		if filename == filepath.Base(baseLogPath) || strings.HasSuffix(filename, ".lock") {
 			continue
 		}
 
@@ -367,11 +390,11 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 			continue
 		}
 
-		if !info.ModTime().Before(cutoff) || isProcessRunning(sessionLockPathForLog(fullPath)) {
+		if !info.ModTime().Before(cutoff) || sessionLockHeld(sessionLockPathForLog(baseLogPath, fullPath)) {
 			continue
 		}
 		_ = pkg.WithLogRotateLock(fullPath, func() error {
-			if staleIdleSessionLog(fullPath, cutoff) {
+			if staleIdleSessionLog(baseLogPath, fullPath, cutoff) {
 				os.Remove(fullPath)
 			}
 			return nil

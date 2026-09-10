@@ -193,13 +193,6 @@ func WithLogRotateLock(logFilePath string, fn func() error) error {
 // WithLogReadLock takes a shared per-log lock so readers see a complete
 // snapshot instead of a file that is mid-truncate or mid-rewrite.
 func WithLogReadLock(logFilePath string, fn func() error) error {
-	exists, err := fileExists(logFilePath)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fn()
-	}
 	return withLogLock(logFilePath, syscall.LOCK_SH, fn)
 }
 
