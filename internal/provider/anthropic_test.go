@@ -30,7 +30,7 @@ func TestNewAnthropicProvider(t *testing.T) {
 	}
 
 	// With ANTHROPIC_REASONING_EFFORT
-	for _, effort := range []string{"low", "medium", "high", "none", "minimal", "custom_effort"} {
+	for _, effort := range []string{"low", "medium", "high"} {
 		os.Setenv("ANTHROPIC_REASONING_EFFORT", effort)
 		p, err = NewAnthropicProvider()
 		os.Unsetenv("ANTHROPIC_REASONING_EFFORT")
@@ -41,6 +41,25 @@ func TestNewAnthropicProvider(t *testing.T) {
 			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
 		}
 	}
+}
+
+func TestNewAnthropicProvider_ReasoningEffortPassThrough(t *testing.T) {
+	os.Setenv("ANTHROPIC_API_KEY", "test-key")
+	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_API_KEY") })
+
+	// Values are passed through to the SDK verbatim, without validation.
+	for _, effort := range []string{"none", "minimal", "custom_effort", "xhigh", "max", "LOW", "High"} {
+		os.Setenv("ANTHROPIC_REASONING_EFFORT", effort)
+		p, err := NewAnthropicProvider()
+		if err != nil {
+			t.Errorf("unexpected error for reasoning effort %s: %v", effort, err)
+			continue
+		}
+		if p.ReasoningEffort != effort {
+			t.Errorf("expected reasoning effort %s, got %s", effort, p.ReasoningEffort)
+		}
+	}
+	t.Cleanup(func() { os.Unsetenv("ANTHROPIC_REASONING_EFFORT") })
 }
 
 func TestNewAnthropicProvider_Errors(t *testing.T) {
