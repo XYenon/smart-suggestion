@@ -235,7 +235,7 @@ function _do_smart_suggestion() {
         fi
     fi
 
-    local input=$(echo "${BUFFER:0:$CURSOR}" | tr '\n' ';')
+    local input=$(printf '%s' "${BUFFER:0:$CURSOR}" | tr '\n' ';')
 
     _zsh_autosuggest_clear
 
@@ -304,7 +304,13 @@ function _do_smart_suggestion() {
 
         zle -U "$suggestion"
     elif [[ "$first_char" == '+' ]]; then
-        _zsh_autosuggest_suggest "$suggestion"
+        if [[ -z "$BUFFER" ]]; then
+            # zsh-autosuggestions only renders suggestions for non-empty buffers.
+            # With nothing to complete, make the suggestion editable like a new command.
+            zle -U "$suggestion"
+        else
+            _zsh_autosuggest_suggest "$suggestion"
+        fi
     fi
 
     zle reset-prompt

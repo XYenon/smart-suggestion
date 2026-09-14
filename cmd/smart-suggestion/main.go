@@ -360,9 +360,6 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	if providerName == "" {
 		return fmt.Errorf("required flag \"provider\" not set")
 	}
-	if input == "" {
-		return fmt.Errorf("required flag \"input\" not set")
-	}
 
 	systemPromptStr := resolveSystemPrompt(sendContext)
 	userInput := buildUserInput(input, scrollbackLines, scrollbackFile, sendContext)

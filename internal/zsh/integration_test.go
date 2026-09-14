@@ -25,6 +25,12 @@ type zshSession struct {
 	done   chan struct{}
 }
 
+type zleState struct {
+	buffer      string
+	cursor      string
+	postDisplay string
+}
+
 func (s *zshSession) Close() error {
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
@@ -100,6 +106,42 @@ func (s *zshSession) SetMockDelay(delay time.Duration) error {
 	return os.WriteFile(filepath.Join(s.tmpDir, "mock_delay"), []byte(fmt.Sprintf("%d", int64(delay.Seconds()))), 0644)
 }
 
+func (s *zshSession) ResetOutput() {
+	s.mu.Lock()
+	s.output.Reset()
+	s.mu.Unlock()
+}
+
+func (s *zshSession) Output() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.output.String()
+}
+
+func (s *zshSession) CaptureZLEState(timeout time.Duration) (zleState, error) {
+	statePath := filepath.Join(s.tmpDir, "zle_state")
+	_ = os.Remove(statePath)
+	_, _ = s.pty.Write([]byte{0x18, 0x14}) // ^X^T
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		contents, err := os.ReadFile(statePath)
+		if err == nil {
+			parts := strings.SplitN(strings.TrimSuffix(string(contents), "\n"), "\t", 3)
+			if len(parts) != 3 {
+				return zleState{}, fmt.Errorf("invalid ZLE state %q", contents)
+			}
+			return zleState{buffer: parts[0], cursor: parts[1], postDisplay: parts[2]}, nil
+		}
+		if !os.IsNotExist(err) {
+			return zleState{}, err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	return zleState{}, fmt.Errorf("timeout capturing ZLE state")
+}
+
 func spawnZsh() (*zshSession, error) {
 	return spawnZshWithProvider("openai")
 }
@@ -139,6 +181,17 @@ func spawnZshWithProviderAndCache(provider, cacheHome string) (*zshSession, erro
 	mockBinContent := `#!/bin/sh
 echo "Binary called with: $@" >> "$MOCK_LOG_FILE"
 echo "$@" > "$MOCK_LAST_ARGS_FILE"
+: > "$MOCK_LAST_INPUT_FILE"
+capture_input=false
+for arg in "$@"; do
+    if [ "$capture_input" = true ]; then
+        printf '%s' "$arg" > "$MOCK_LAST_INPUT_FILE"
+        break
+    fi
+    if [ "$arg" = "--input" ]; then
+        capture_input=true
+    fi
+done
 
 if [ -f "$MOCK_DELAY_FILE" ]; then
     sleep $(cat "$MOCK_DELAY_FILE")
@@ -206,7 +259,9 @@ SMART_SUGGESTION_DEBUG="true"
 		"MOCK_RESPONSE_FILE="+filepath.Join(tmpDir, "mock_response"),
 		"MOCK_DELAY_FILE="+filepath.Join(tmpDir, "mock_delay"),
 		"MOCK_LAST_ARGS_FILE="+filepath.Join(tmpDir, "last_args"),
+		"MOCK_LAST_INPUT_FILE="+filepath.Join(tmpDir, "last_input"),
 		"MOCK_LOG_FILE="+filepath.Join(tmpDir, "mock.log"),
+		"MOCK_STATE_FILE="+filepath.Join(tmpDir, "zle_state"),
 	)
 
 	f, err := pty.Start(cmd)
@@ -232,7 +287,7 @@ SMART_SUGGESTION_DEBUG="true"
 	_, err = session.Expect("PROMPT_SET", 10*time.Second)
 	if err != nil {
 		session.Close()
-		return nil, fmt.Errorf("failed to set prompt: %v. Output: %s", err, session.output.String())
+		return nil, fmt.Errorf("failed to set prompt: %v. Output: %s", err, session.Output())
 	}
 
 	_, _ = session.pty.Write([]byte(fmt.Sprintf("source %s/zsh-autosuggestions.zsh\r\n", autosuggestDir)))
@@ -240,16 +295,29 @@ SMART_SUGGESTION_DEBUG="true"
 	_, err = session.Expect("AUTOSUGGEST_SOURCED", 10*time.Second)
 	if err != nil {
 		session.Close()
-		return nil, fmt.Errorf("failed to source zsh-autosuggestions: %v. Output: %s", err, session.output.String())
+		return nil, fmt.Errorf("failed to source zsh-autosuggestions: %v. Output: %s", err, session.Output())
 	}
 
-	session.output.Reset()
+	session.ResetOutput()
 	_, _ = session.pty.Write([]byte(fmt.Sprintf("source %s\r\n", pluginPath)))
 	_, _ = session.pty.Write([]byte("echo PLUGIN_SOURCED\r\n"))
 	_, err = session.Expect("PLUGIN_SOURCED", 10*time.Second)
 	if err != nil {
 		session.Close()
-		return nil, fmt.Errorf("failed to source plugin: %v. Output: %s", err, session.output.String())
+		return nil, fmt.Errorf("failed to source plugin: %v. Output: %s", err, session.Output())
+	}
+
+	_, _ = session.pty.Write([]byte(`function _test_dump_zle_state() {
+    print -r -- "$BUFFER"$'\t'"$CURSOR"$'\t'"$POSTDISPLAY" >| "$MOCK_STATE_FILE"
+}
+zle -N _test_dump_zle_state
+bindkey '^X^T' _test_dump_zle_state
+echo STATE_WIDGET_REGISTERED
+`))
+	_, err = session.Expect("STATE_WIDGET_REGISTERED", 10*time.Second)
+	if err != nil {
+		session.Close()
+		return nil, fmt.Errorf("failed to register state widget: %v. Output: %s", err, session.Output())
 	}
 
 	return session, nil
@@ -258,6 +326,127 @@ SMART_SUGGESTION_DEBUG="true"
 func (s *zshSession) TriggerSuggest() {
 	// Send ^O (Ctrl-O) which is bound to _do_smart_suggestion
 	_, _ = s.pty.Write([]byte{0x0f})
+}
+
+func TestEmptyBufferAppendSuggestion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	session, err := spawnZsh()
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	const suggestion = "printf empty-buffer-completion"
+	if err := session.SetMockResponse("+" + suggestion); err != nil {
+		t.Fatalf("Failed to set mock response: %v", err)
+	}
+
+	session.ResetOutput()
+	session.TriggerSuggest()
+	state, err := session.CaptureZLEState(10 * time.Second)
+	if err != nil {
+		t.Fatalf("Failed to capture ZLE state: %v. Output: %s", err, session.Output())
+	}
+
+	if state.buffer != suggestion || state.cursor != fmt.Sprint(len(suggestion)) || state.postDisplay != "" {
+		t.Fatalf("Empty-buffer completion was not made editable: state=%+v, output=%q", state, session.Output())
+	}
+	if !strings.Contains(session.Output(), suggestion) {
+		t.Fatalf("Empty-buffer completion was not rendered in the PTY: output=%q", session.Output())
+	}
+	input, err := os.ReadFile(filepath.Join(session.tmpDir, "last_input"))
+	if err != nil {
+		t.Fatalf("Failed to read captured input: %v", err)
+	}
+	if string(input) != "" {
+		t.Fatalf("Empty BUFFER was passed to the binary as %q, want empty", input)
+	}
+	t.Logf("PTY rendered suggestion; BUFFER=%q CURSOR=%s POSTDISPLAY=%q", state.buffer, state.cursor, state.postDisplay)
+
+	session.ResetOutput()
+	if _, err := session.RunCommand("", 2*time.Second); err != nil {
+		t.Fatalf("Failed to execute editable suggestion: %v. Output: %s", err, session.Output())
+	}
+	if !strings.Contains(session.Output(), "empty-buffer-completion") {
+		t.Fatalf("Editable suggestion did not execute: output=%q", session.Output())
+	}
+}
+
+func TestSuggestionProtocolStates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	session, err := spawnZsh()
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	tests := []struct {
+		name                string
+		initialBuffer       string
+		response            string
+		expectedBuffer      string
+		expectedPostDisplay string
+	}{
+		{
+			name:                "completion keeps non-empty buffer as ghost text",
+			initialBuffer:       "existing-input",
+			response:            "+ completion-text",
+			expectedBuffer:      "existing-input",
+			expectedPostDisplay: " completion-text",
+		},
+		{
+			name:           "new command replaces empty buffer",
+			response:       "=replacement-text",
+			expectedBuffer: "replacement-text",
+		},
+		{
+			name:     "empty response leaves empty buffer",
+			response: "",
+		},
+		{
+			name:     "empty completion leaves empty buffer",
+			response: "+",
+		},
+		{
+			name:     "invalid prefix leaves empty buffer",
+			response: "?invalid-response",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _ = session.pty.Write([]byte{0x15}) // ^U
+			if tt.initialBuffer != "" {
+				_, _ = session.pty.Write([]byte(tt.initialBuffer))
+			}
+			if err := session.SetMockResponse(tt.response); err != nil {
+				t.Fatalf("Failed to set mock response: %v", err)
+			}
+
+			session.ResetOutput()
+			session.TriggerSuggest()
+			state, err := session.CaptureZLEState(10 * time.Second)
+			if err != nil {
+				t.Fatalf("Failed to capture ZLE state: %v. Output: %s", err, session.Output())
+			}
+
+			if state.buffer != tt.expectedBuffer {
+				t.Errorf("BUFFER = %q, want %q", state.buffer, tt.expectedBuffer)
+			}
+			if state.cursor != fmt.Sprint(len(tt.expectedBuffer)) {
+				t.Errorf("CURSOR = %s, want %d", state.cursor, len(tt.expectedBuffer))
+			}
+			if state.postDisplay != tt.expectedPostDisplay {
+				t.Errorf("POSTDISPLAY = %q, want %q", state.postDisplay, tt.expectedPostDisplay)
+			}
+		})
+	}
 }
 
 func TestAppendSuggestion(t *testing.T) {
@@ -288,7 +477,7 @@ func TestAppendSuggestion(t *testing.T) {
 	if err != nil {
 		mockLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "mock.log"))
 		debugLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "smart-suggestion/debug.log"))
-		t.Fatalf("Binary was not called: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.output.String())
+		t.Fatalf("Binary was not called: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.Output())
 	}
 	if !strings.Contains(string(lastArgs), "--input echo") {
 		t.Errorf("Expected input 'echo' to be passed to binary, but got: %s", string(lastArgs))
@@ -305,7 +494,7 @@ func TestAppendSuggestion(t *testing.T) {
 	// 5. Expect the output
 	_, err = session.Expect("appended_text", 2*time.Second)
 	if err != nil {
-		t.Fatalf("Suggestion was not appended or executed. Output: %s", session.output.String())
+		t.Fatalf("Suggestion was not appended or executed. Output: %s", session.Output())
 	}
 }
 
@@ -341,7 +530,7 @@ func TestReplaceSuggestion(t *testing.T) {
 	// 5. Expect the output of the *replaced* command
 	_, err = session.Expect("replaced_command", 2*time.Second)
 	if err != nil {
-		t.Fatalf("Buffer was not replaced. Expected output 'replaced_command' not found. Output: %s", session.output.String())
+		t.Fatalf("Buffer was not replaced. Expected output 'replaced_command' not found. Output: %s", session.Output())
 	}
 }
 
@@ -362,7 +551,7 @@ func TestErrorHandling(t *testing.T) {
 
 	_, err = session.Expect("API_ERROR_500", 10*time.Second)
 	if err != nil {
-		t.Fatalf("Error message did not appear: %v. Output: %s", err, session.output.String())
+		t.Fatalf("Error message did not appear: %v. Output: %s", err, session.Output())
 	}
 }
 
@@ -387,7 +576,7 @@ func TestErrorHandlingPreservesInput(t *testing.T) {
 
 	_, err = session.Expect("API_ERROR_500", 10*time.Second)
 	if err != nil {
-		t.Fatalf("Error message did not appear: %v. Output: %s", err, session.output.String())
+		t.Fatalf("Error message did not appear: %v. Output: %s", err, session.Output())
 	}
 
 	// Press Enter to execute the preserved input on the new prompt
@@ -395,7 +584,7 @@ func TestErrorHandlingPreservesInput(t *testing.T) {
 
 	_, err = session.Expect("my_original_input", 2*time.Second)
 	if err != nil {
-		t.Fatalf("Original input was not preserved after error. Output: %s", session.output.String())
+		t.Fatalf("Original input was not preserved after error. Output: %s", session.Output())
 	}
 }
 
@@ -417,7 +606,7 @@ func TestTimeoutHandling(t *testing.T) {
 
 	_, err = session.Expect("Press <Ctrl-c> to cancel", 5*time.Second)
 	if err != nil {
-		t.Fatalf("Loading animation did not appear: %v. Output: %s", err, session.output.String())
+		t.Fatalf("Loading animation did not appear: %v. Output: %s", err, session.Output())
 	}
 }
 
@@ -442,7 +631,7 @@ func TestConfigurationSync(t *testing.T) {
 	if err != nil {
 		mockLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "mock.log"))
 		debugLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "smart-suggestion/debug.log"))
-		t.Fatalf("Binary not called for initial request: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.output.String())
+		t.Fatalf("Binary not called for initial request: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.Output())
 	}
 	if !strings.Contains(string(lastArgs), "--provider openai") {
 		t.Errorf("Expected initial provider 'openai', got: %s", string(lastArgs))
@@ -473,7 +662,7 @@ SMART_SUGGESTION_DEBUG="true"
 	if err != nil {
 		mockLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "mock.log"))
 		debugLog, _ := os.ReadFile(filepath.Join(session.tmpDir, "smart-suggestion/debug.log"))
-		t.Fatalf("Binary not called after changing provider: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.output.String())
+		t.Fatalf("Binary not called after changing provider: %v. Mock log: %s. Debug log: %s. Output: %s", err, string(mockLog), string(debugLog), session.Output())
 	}
 	if !strings.Contains(string(lastArgs), "--provider anthropic") {
 		t.Errorf("Expected provider 'anthropic' after export, but got: %s", string(lastArgs))
@@ -917,7 +1106,7 @@ func TestNumericReplaceSuggestionIsNotReadAsPID(t *testing.T) {
 
 	_, err = session.Expect("42", 5*time.Second)
 	if err != nil {
-		t.Fatalf("numeric replace suggestion was not applied. Output: %s", session.output.String())
+		t.Fatalf("numeric replace suggestion was not applied. Output: %s", session.Output())
 	}
 }
 

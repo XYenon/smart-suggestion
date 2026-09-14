@@ -119,7 +119,7 @@ func TestBuildUserInputWithScrollback(t *testing.T) {
 	}
 }
 
-func TestRunSuggestMissingFlags(t *testing.T) {
+func TestRunSuggestMissingProvider(t *testing.T) {
 	oldProvider := providerName
 	oldInput := input
 	oldDebug := dbg
@@ -139,13 +139,6 @@ func TestRunSuggestMissingFlags(t *testing.T) {
 	err := runSuggest(cmd, nil)
 	if err == nil {
 		t.Fatal("expected error for missing provider flag")
-	}
-
-	providerName = "openai"
-	input = ""
-	err = runSuggest(cmd, nil)
-	if err == nil {
-		t.Fatal("expected error for missing input flag")
 	}
 }
 
@@ -657,8 +650,9 @@ func TestBuildRootCmdVersionSubcommand(t *testing.T) {
 }
 
 type mockProvider struct {
-	response string
-	err      error
+	response      string
+	err           error
+	receivedInput string
 }
 
 func (m *mockProvider) Fetch(ctx context.Context, input, systemPrompt string) (string, error) {
@@ -666,6 +660,7 @@ func (m *mockProvider) Fetch(ctx context.Context, input, systemPrompt string) (s
 }
 
 func (m *mockProvider) FetchWithHistory(ctx context.Context, input, systemPrompt string, history []provider.Message) (string, error) {
+	m.receivedInput = input
 	return m.response, m.err
 }
 
@@ -707,6 +702,49 @@ func TestRunSuggestSuccess(t *testing.T) {
 	}
 	if string(content) != "=ls -la" {
 		t.Fatalf("expected '=ls -la', got %q", string(content))
+	}
+}
+
+func TestRunSuggestEmptyInput(t *testing.T) {
+	oldSelect := selectProviderFunc
+	oldOutput := outputFile
+	oldInput := input
+	oldProvider := providerName
+	oldDebug := dbg
+	oldContext := sendContext
+	t.Cleanup(func() {
+		selectProviderFunc = oldSelect
+		outputFile = oldOutput
+		input = oldInput
+		providerName = oldProvider
+		dbg = oldDebug
+		sendContext = oldContext
+	})
+
+	mock := &mockProvider{response: "+next-command"}
+	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
+		return mock, nil
+	}
+	outputFile = filepath.Join(t.TempDir(), "output.txt")
+	input = ""
+	providerName = "mock"
+	dbg = false
+	sendContext = false
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	if err := runSuggest(cmd, nil); err != nil {
+		t.Fatalf("unexpected error for empty input: %v", err)
+	}
+	if mock.receivedInput != "" {
+		t.Fatalf("provider input = %q, want empty", mock.receivedInput)
+	}
+	content, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	if string(content) != "+next-command" {
+		t.Fatalf("output = %q, want %q", content, "+next-command")
 	}
 }
 
