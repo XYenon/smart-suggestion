@@ -92,6 +92,31 @@ func TestVTSinkKeepsLatestTerminalLines(t *testing.T) {
 	}
 }
 
+func TestVTSinkLogicalLineLimitDoesNotSplitSoftWrap(t *testing.T) {
+	sink, logPath := newTestVTSink(t, 2, 4, 6)
+
+	writeVT(t, sink, "abcdefghij\r\nlast")
+
+	if got, want := readLog(t, logPath), "abcdefghij\nlast"; got != want {
+		t.Fatalf("log = %q, want %q", got, want)
+	}
+}
+
+func TestVTSinkLogicalHistorySurvivesNarrowWideResize(t *testing.T) {
+	sink, logPath := newTestVTSink(t, 3, 12, 2)
+	writeVT(t, sink, "drop\r\nkeep-one\r\nkeep-two\r\nabcdefghij")
+
+	sink.Resize(4, 2)
+	sink.Resize(12, 2)
+	if err := sink.flush(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, want := readLog(t, logPath), "keep-one\nkeep-two\nabcdefghij"; got != want {
+		t.Fatalf("log = %q, want %q", got, want)
+	}
+}
+
 func TestVTSinkAlternateScreen(t *testing.T) {
 	sink, logPath := newTestVTSink(t, 10, 30, 3)
 

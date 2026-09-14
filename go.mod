@@ -69,4 +69,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/charmbracelet/x/vt => github.com/XYenon/charmbracelet-x/vt v0.0.0-20260914044822-a554ff9923b5
+replace github.com/charmbracelet/x/vt => github.com/XYenon/charmbracelet-x/vt v0.0.0-20260914053343-b987644006ee

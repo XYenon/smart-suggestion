@@ -45,7 +45,7 @@ func newVTSink(file *os.File, filePath string, maxLines, width, height int) *vtS
 	}
 
 	emulator := vt.NewEmulator(width, height)
-	emulator.SetScrollbackSize(maxLines)
+	emulator.SetLogicalScrollbackSize(maxLines)
 	sink := &vtSink{
 		file:     file,
 		filePath: filePath,
@@ -244,27 +244,19 @@ func (w *vtSink) persistSnapshotLocked(content string) error {
 }
 
 func (w *vtSink) snapshotLocked() string {
-	physicalLines := w.emulator.PhysicalLines()
-	for len(physicalLines) > 0 && physicalLines[len(physicalLines)-1].String() == "" {
-		physicalLines = physicalLines[:len(physicalLines)-1]
+	lines := w.emulator.LogicalLines()
+	for len(lines) > 0 && lines[len(lines)-1].String() == "" {
+		lines = lines[:len(lines)-1]
 	}
-	if len(physicalLines) > w.maxLines {
-		physicalLines = physicalLines[len(physicalLines)-w.maxLines:]
+	if len(lines) > w.maxLines {
+		lines = lines[len(lines)-w.maxLines:]
 	}
 
-	logicalLines := make([]string, 0, len(physicalLines))
-	var logicalLine strings.Builder
-	for _, line := range physicalLines {
-		logicalLine.WriteString(line.String())
-		if !line.Wrapped() {
-			logicalLines = append(logicalLines, logicalLine.String())
-			logicalLine.Reset()
-		}
+	text := make([]string, len(lines))
+	for i, line := range lines {
+		text[i] = line.String()
 	}
-	if logicalLine.Len() > 0 {
-		logicalLines = append(logicalLines, logicalLine.String())
-	}
-	return strings.Join(logicalLines, "\n")
+	return strings.Join(text, "\n")
 }
 
 func (w *vtSink) reopenIfRotated() error {
