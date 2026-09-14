@@ -4,6 +4,7 @@ package proxy
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	"time"
 
 	"github.com/xyenon/smart-suggestion/internal/session"
-	"github.com/xyenon/smart-suggestion/pkg"
 )
 
 func TestIsProcessRunning(t *testing.T) {
@@ -369,495 +369,75 @@ func TestRunProxy_PTYError(t *testing.T) {
 	}
 }
 
-func TestLineLimitedWriterReopensAfterRotation(t *testing.T) {
+func TestRunProxyCapturesRenderedTerminalState(t *testing.T) {
+	t.Setenv("SMART_SUGGESTION_PROXY_ACTIVE", "")
 	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "test.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
+	shell := filepath.Join(tempDir, "shell")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf '\\033[31mold\\033[0m\\rnew\\033[K\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	defer f.Close()
+	logFile := filepath.Join(tempDir, "proxy.log")
+	var stdout bytes.Buffer
 
-	w := newLineLimitedWriter(f, logPath, 10)
-	if _, err := w.Write([]byte("before\n")); err != nil {
+	if err := RunProxyWithIO(shell, ProxyOptions{
+		LogFile:   logFile,
+		SessionID: "rendered",
+	}, strings.NewReader(""), &stdout); err != nil {
 		t.Fatal(err)
 	}
 
-	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
-	if err := lr.ForceRotate(logPath); err != nil {
-		t.Fatal(err)
+	if got := stdout.String(); !strings.Contains(got, "\x1b[31mold\x1b[0m\rnew\x1b[K") {
+		t.Fatalf("stdout did not preserve raw terminal output: %q", got)
 	}
-	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
-		t.Fatalf("expected original log to be renamed, got %v", err)
-	}
-
-	if _, err := w.Write([]byte("after\n")); err != nil {
-		t.Fatal(err)
-	}
-
-	content, err := os.ReadFile(logPath)
+	sessionLog := session.GetSessionBasedLogFile(logFile, "rendered")
+	content, err := os.ReadFile(sessionLog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := string(content)
-	if !strings.Contains(got, "after") {
-		t.Fatalf("reopened log missing new content: %q", got)
-	}
-	if !strings.Contains(got, "before") {
-		t.Fatalf("reopened log missing ring buffer: %q", got)
-	}
-
-	backups, err := lr.GetBackupFiles(logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(backups) != 1 {
-		t.Fatalf("expected 1 backup, got %d (%v)", len(backups), backups)
-	}
-	backup, err := os.ReadFile(backups[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(backup), "before") {
-		t.Fatalf("backup missing pre-rotation content: %q", backup)
+	if got, want := string(content), "new"; got != want {
+		t.Fatalf("rendered log = %q, want %q", got, want)
 	}
 }
 
-func TestLineLimitedWriterCloseClosesReopenedFile(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "test.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-
-	w := newLineLimitedWriter(f, logPath, 10)
-	if _, err := w.Write([]byte("before\n")); err != nil {
-		t.Fatal(err)
-	}
-
-	lr := pkg.NewLogRotator(&pkg.LogRotateConfig{MaxAge: 1, MaxBackups: 5, Compress: false})
-	if err := lr.ForceRotate(logPath); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write([]byte("after\n")); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if w.file != nil {
-		t.Fatal("expected writer to release the log fd")
+func TestTerminalSizeDefaultsForNonTerminal(t *testing.T) {
+	if width, height := terminalSize(strings.NewReader("")); width != 80 || height != 24 {
+		t.Fatalf("size = %dx%d, want 80x24", width, height)
 	}
 }
 
-func TestLineLimitedWriter_Basic(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "test.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 3)
-
-	// Write 5 lines
-	for i := 1; i <= 5; i++ {
-		_, err := w.Write([]byte("line" + strconv.Itoa(i) + "\n"))
-		if err != nil {
-			t.Fatalf("Write failed: %v", err)
-		}
-	}
-
-	// Read file content
-	content, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("failed to read log file: %v", err)
-	}
-
-	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
-	if len(lines) != 3 {
-		t.Errorf("expected 3 lines, got %d: %v", len(lines), lines)
-	}
-	if lines[0] != "line3" {
-		t.Errorf("expected first line to be line3, got %s", lines[0])
-	}
-	if lines[2] != "line5" {
-		t.Errorf("expected last line to be line5, got %s", lines[2])
-	}
+type failingWriter struct {
+	n   int
+	err error
 }
 
-func TestLineLimitedWriter_PartialWrites(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "partial.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 2)
-
-	// Write partial data (no newline yet)
-	w.Write([]byte("hel"))
-	w.Write([]byte("lo"))
-	w.Write([]byte("\n"))
-	w.Write([]byte("wor"))
-	w.Write([]byte("ld\n"))
-
-	content, _ := os.ReadFile(logPath)
-	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
-	if len(lines) != 2 {
-		t.Errorf("expected 2 lines, got %d: %v", len(lines), lines)
-	}
-	if lines[0] != "hello" {
-		t.Errorf("expected 'hello', got %s", lines[0])
-	}
-	if lines[1] != "world" {
-		t.Errorf("expected 'world', got %s", lines[1])
-	}
+func (w failingWriter) Write([]byte) (int, error) {
+	return w.n, w.err
 }
 
-func TestLineLimitedWriter_NoNewline(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "nonewline.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 5)
-
-	// Write data without newline - should be buffered
-	w.Write([]byte("no newline yet"))
-
-	content, _ := os.ReadFile(logPath)
-	if len(content) != 0 {
-		t.Errorf("expected empty file (data buffered), got %s", string(content))
-	}
-
-	// Now add the newline
-	w.Write([]byte("\n"))
-	content, _ = os.ReadFile(logPath)
-	if string(content) != "no newline yet\n" {
-		t.Errorf("expected 'no newline yet\\n', got %s", string(content))
-	}
-}
-
-func TestLineLimitedWriter_ExactLimit(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "exact.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 3)
-
-	// Write exactly 3 lines
-	w.Write([]byte("a\nb\nc\n"))
-
-	content, _ := os.ReadFile(logPath)
-	expected := "a\nb\nc\n"
-	if string(content) != expected {
-		t.Errorf("expected %q, got %q", expected, string(content))
-	}
-
-	// Add one more line - oldest should be removed
-	w.Write([]byte("d\n"))
-	content, _ = os.ReadFile(logPath)
-	expected = "b\nc\nd\n"
-	if string(content) != expected {
-		t.Errorf("expected %q, got %q", expected, string(content))
-	}
-}
-
-func TestLineLimitedWriter_MultipleNewlinesInOneWrite(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "multi.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 2)
-
-	// Write multiple lines at once
-	w.Write([]byte("line1\nline2\nline3\nline4\n"))
-
-	content, _ := os.ReadFile(logPath)
-	expected := "line3\nline4\n"
-	if string(content) != expected {
-		t.Errorf("expected %q, got %q", expected, string(content))
-	}
-}
-
-func TestLineLimitedWriter_EmptyWrite(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "empty.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 5)
-
-	n, err := w.Write([]byte{})
-	if err != nil {
-		t.Errorf("unexpected error: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("expected 0 bytes written, got %d", n)
-	}
-}
-
-func TestLineLimitedWriter_SingleLine(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "single.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 1)
-
-	w.Write([]byte("first\n"))
-	w.Write([]byte("second\n"))
-	w.Write([]byte("third\n"))
-
-	content, _ := os.ReadFile(logPath)
-	expected := "third\n"
-	if string(content) != expected {
-		t.Errorf("expected %q, got %q", expected, string(content))
-	}
-}
-
-func TestStripANSI(t *testing.T) {
+func TestBestEffortLogWriterDoesNotPropagateFailure(t *testing.T) {
+	payload := []byte("terminal output")
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name   string
+		writer io.Writer
 	}{
-		{
-			name:     "no escape sequences",
-			input:    "hello world",
-			expected: "hello world",
-		},
-		{
-			name:     "simple color",
-			input:    "\x1b[31mred text\x1b[0m",
-			expected: "red text",
-		},
-		{
-			name:     "bold and color",
-			input:    "\x1b[1;32mbold green\x1b[0m",
-			expected: "bold green",
-		},
-		{
-			name:     "cursor movement",
-			input:    "\x1b[2Jclear screen\x1b[H",
-			expected: "clear screen",
-		},
-		{
-			name:     "OSC sequence (window title)",
-			input:    "\x1b]0;Window Title\x07content",
-			expected: "content",
-		},
-		{
-			name:     "OSC 7 file URL",
-			input:    "\x1b]7;file://hostname/path\x07content",
-			expected: "content",
-		},
-		{
-			name:     "leftover OSC content at line start",
-			input:    "7;file://M20RQRV6G4/Users/bytedance\nactual content",
-			expected: "\nactual content",
-		},
-		{
-			name:     "mixed content",
-			input:    "start \x1b[31mred\x1b[0m middle \x1b[1mbold\x1b[0m end",
-			expected: "start red middle bold end",
-		},
-		{
-			name:     "256 color",
-			input:    "\x1b[38;5;196mred\x1b[0m",
-			expected: "red",
-		},
-		{
-			name:     "RGB color",
-			input:    "\x1b[38;2;255;0;0mred\x1b[0m",
-			expected: "red",
-		},
-		{
-			name:     "cursor save/restore",
-			input:    "\x1b7saved\x1b8restored",
-			expected: "savedrestored",
-		},
-		{
-			name:     "erase line",
-			input:    "text\x1b[Kerased",
-			expected: "texterased",
-		},
-		{
-			name:     "backspace simulates deletion",
-			input:    "abc\x08\x08xy",
-			expected: "axy",
-		},
-		{
-			name:     "backspace at line start",
-			input:    "line1\n\x08\x08line2",
-			expected: "line1\nline2",
-		},
-		{
-			name:     "carriage return overwrites line",
-			input:    "old text\rnew",
-			expected: "new",
-		},
-		{
-			name:     "carriage return with newline",
-			input:    "line1\r\nline2",
-			expected: "line1\nline2",
-		},
-		{
-			name:     "bell character removed",
-			input:    "alert\x07text",
-			expected: "alerttext",
-		},
-		{
-			name:     "progress bar simulation",
-			input:    "Loading... 10%\rLoading... 50%\rLoading... 100%",
-			expected: "Loading... 100%",
-		},
+		{name: "error", writer: failingWriter{err: errors.New("disk full")}},
+		{name: "short write", writer: failingWriter{n: len(payload) - 1}},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := stripANSI(tt.input)
-			if got != tt.expected {
-				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, got, tt.expected)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			writer := io.MultiWriter(&stdout, bestEffortLogWriter{writer: test.writer})
+			n, err := writer.Write(payload)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if n != len(payload) {
+				t.Fatalf("wrote %d bytes, want %d", n, len(payload))
+			}
+			if !bytes.Equal(stdout.Bytes(), payload) {
+				t.Fatalf("stdout = %q, want %q", stdout.Bytes(), payload)
 			}
 		})
-	}
-}
-
-func TestSimulateTerminal(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "simple text",
-			input:    "hello",
-			expected: "hello",
-		},
-		{
-			name:     "backspace deletes char",
-			input:    "ab\x08c",
-			expected: "ac",
-		},
-		{
-			name:     "multiple backspaces",
-			input:    "abcd\x08\x08\x08xyz",
-			expected: "axyz",
-		},
-		{
-			name:     "backspace at start does nothing",
-			input:    "\x08\x08abc",
-			expected: "abc",
-		},
-		{
-			name:     "backspace stops at newline",
-			input:    "line1\n\x08\x08abc",
-			expected: "line1\nabc",
-		},
-		{
-			name:     "carriage return resets line",
-			input:    "hello\rworld",
-			expected: "world",
-		},
-		{
-			name:     "CR preserves previous lines",
-			input:    "line1\nold\rnew",
-			expected: "line1\nnew",
-		},
-		{
-			name:     "CRLF becomes LF",
-			input:    "a\r\nb",
-			expected: "a\nb",
-		},
-		{
-			name:     "vertical tab becomes newline",
-			input:    "a\x0bb",
-			expected: "a\nb",
-		},
-		{
-			name:     "form feed becomes newline",
-			input:    "a\x0cb",
-			expected: "a\nb",
-		},
-		{
-			name:     "spinner simulation",
-			input:    "|\r/\r-\r\\\r|",
-			expected: "|",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := simulateTerminal(tt.input)
-			if got != tt.expected {
-				t.Errorf("simulateTerminal(%q) = %q, want %q", tt.input, got, tt.expected)
-			}
-		})
-	}
-}
-
-func TestLineLimitedWriter_StripANSI(t *testing.T) {
-	tempDir := t.TempDir()
-	logPath := filepath.Join(tempDir, "ansi.log")
-
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		t.Fatalf("failed to create log file: %v", err)
-	}
-	defer f.Close()
-
-	w := newLineLimitedWriter(f, logPath, 5)
-
-	// Write lines with ANSI escape sequences
-	w.Write([]byte("\x1b[31merror: something failed\x1b[0m\n"))
-	w.Write([]byte("\x1b[1;32mSuccess!\x1b[0m\n"))
-	w.Write([]byte("normal line\n"))
-
-	content, _ := os.ReadFile(logPath)
-	lines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
-
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines, got %d: %v", len(lines), lines)
-	}
-	if lines[0] != "error: something failed" {
-		t.Errorf("expected 'error: something failed', got %q", lines[0])
-	}
-	if lines[1] != "Success!" {
-		t.Errorf("expected 'Success!', got %q", lines[1])
-	}
-	if lines[2] != "normal line" {
-		t.Errorf("expected 'normal line', got %q", lines[2])
 	}
 }

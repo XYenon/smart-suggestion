@@ -318,7 +318,9 @@ Besides the suggestion flow invoked by the plugin, the `smart-suggestion` binary
 Smart Suggestion automatically enables **proxy mode** by default, which provides significantly better context awareness by recording your terminal session. This mode:
 
 - **Starts automatically** when your shell starts, wrapping your session in a PTY-based recorder (no external tools required)
-- **Records terminal output** including command results and error messages, giving the AI rich context
+- **Records terminal output** through a PTY while preserving the original terminal stream
+- **Renders terminal state** with `charmbracelet/x/vt`, so cursor movement, screen clearing, alternate screens, and wide characters are captured accurately
+- **Provides rich context** to the AI including command outputs and error messages
 - **Works seamlessly** across different terminal environments
 - **Is skipped** when a terminal with native scrollback integration is detected (Tmux, Herdr, Kitty, Ghostty; see below)
 
