@@ -3,9 +3,11 @@
 package proxy
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -30,7 +32,12 @@ func newTestVTSink(t *testing.T, maxLines, width, height int) (*vtSink, string) 
 
 func readLog(t *testing.T, path string) string {
 	t.Helper()
-	content, err := os.ReadFile(path)
+	var content []byte
+	err := pkg.WithLogReadLock(path, func() error {
+		var err error
+		content, err = os.ReadFile(path)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +52,9 @@ func writeVT(t *testing.T, sink *vtSink, text string) {
 	}
 	if n != len(text) {
 		t.Fatalf("wrote %d bytes, want %d", n, len(text))
+	}
+	if err := sink.flush(); err != nil {
+		t.Fatalf("flush VT sink: %v", err)
 	}
 }
 
@@ -155,6 +165,93 @@ func TestVTSinkDrainsTerminalResponses(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("VT write blocked while producing terminal responses")
+	}
+}
+
+func TestVTSinkFlushesAfterIdle(t *testing.T) {
+	sink, logPath := newTestVTSink(t, 10, 20, 3)
+	if _, err := sink.Write([]byte("idle snapshot")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if readLog(t, logPath) == "idle snapshot" {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("VT snapshot was not persisted after the flush interval")
+}
+
+func TestVTSinkFlushesAfterNewline(t *testing.T) {
+	sink, logPath := newTestVTSink(t, 10, 20, 3)
+	if _, err := sink.Write([]byte("complete line\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if readLog(t, logPath) == "complete line" {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("VT snapshot was not persisted after a newline")
+}
+
+func TestVTSinkBlockedPersistenceDoesNotBlockOutput(t *testing.T) {
+	sink, logPath := newTestVTSink(t, 10, 20, 3)
+	lock, err := os.OpenFile(logPath+".rotate.lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+
+	var stdout strings.Builder
+	writer := io.MultiWriter(&stdout, bestEffortLogWriter{writer: sink})
+	if _, err := writer.Write([]byte("first ")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * vtFlushInterval)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := writer.Write([]byte("second"))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("PTY output blocked behind log persistence")
+	}
+	if got, want := stdout.String(), "first second"; got != want {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestVTSinkCloseFlushesPendingSnapshot(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "proxy.log")
+	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := newVTSink(file, logPath, 10, 20, 3)
+	if _, err := sink.Write([]byte("final snapshot")); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readLog(t, logPath), "final snapshot"; got != want {
+		t.Fatalf("log = %q, want %q", got, want)
 	}
 }
 
