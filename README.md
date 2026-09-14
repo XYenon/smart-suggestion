@@ -4,7 +4,7 @@
 >
 > This project is a fork of [zsh-copilot](https://github.com/Myzel394/zsh-copilot) by [Myzel394](https://github.com/Myzel394).
 
-Get AI-powered command suggestions **directly** in your zsh shell. No complex setup, no external tools - just press `CTRL + O` and get intelligent command suggestions powered by OpenAI, Anthropic Claude, or Google Gemini.
+Get AI-powered command suggestions **directly** in your zsh shell. No complex setup, no external tools - just press `CTRL + O` and get intelligent command suggestions powered by OpenAI, Azure OpenAI, Anthropic Claude, or Google Gemini.
 
 > [!NOTE]
 >
@@ -17,7 +17,7 @@ Get AI-powered command suggestions **directly** in your zsh shell. No complex se
 ## Features
 
 - **🚀 Context-aware intelligent prediction**: Predicts the next command you are likely to input based on context (history, aliases, terminal buffer)
-- **🤖 Multiple AI Providers**: Support for OpenAI GPT, Anthropic Claude, and Google Gemini
+- **🤖 Multiple AI Providers**: Support for OpenAI GPT, Azure OpenAI, Anthropic Claude, and Google Gemini
 - **🔧 Highly Configurable**: Customize keybindings, AI provider, context sharing, and more
 
 ## Questions
@@ -46,10 +46,10 @@ curl -fsSL https://raw.githubusercontent.com/XYenon/smart-suggestion/main/instal
 
 This script will:
 
-- Detect your platform (Linux, macOS, Windows)
+- Detect your platform (Linux, macOS, Android)
 - Download the appropriate pre-built binary
 - Install the plugin to its installation directory (e.g., `~/.config/smart-suggestion` or `${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/smart-suggestion` if Oh My Zsh is detected)
-- Configure your `~/.zshrc` automatically with proxy mode enabled by default
+- Add the plugin to your `~/.zshrc` automatically (with Oh My Zsh, you will be instructed to run `omz plugin enable smart-suggestion` instead)
 - Check for zsh-autosuggestions dependency
 
 **Uninstall:**
@@ -166,7 +166,7 @@ The recommended way to configure smart-suggestion is by creating a `config.zsh` 
 # ~/.config/smart-suggestion/config.zsh
 OPENAI_API_KEY="your-openai-api-key"
 OPENAI_API_TYPE="responses" # Optional, "chat_completions" (default) or "responses"
-OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high" (for reasoning models)
+OPENAI_REASONING_EFFORT="medium" # Optional, "none", "minimal", "low", "medium", "high", "xhigh", or "max" (for reasoning models, varies by model)
 ```
 
 #### Azure OpenAI
@@ -178,7 +178,7 @@ AZURE_OPENAI_RESOURCE_NAME="your-azure-openai-resource-name" # i.e. awesome-corp
 AZURE_OPENAI_DEPLOYMENT_NAME="your-deployment-name" # i.e. gpt-5.6-terra
 AZURE_OPENAI_API_VERSION="2025-04-01-preview"  # Optional, defaults to 2025-04-01-preview
 AZURE_OPENAI_BASE_URL="https://your-azure-openai-base-url" # Optional, default to https://$AZURE_OPENAI_RESOURCE_NAME.openai.azure.com
-AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
+AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "none", "minimal", "low", "medium", "high", "xhigh", or "max" (varies by model)
 ```
 
 #### Anthropic Claude
@@ -186,7 +186,7 @@ AZURE_OPENAI_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 ANTHROPIC_API_KEY="your-anthropic-api-key"
-ANTHROPIC_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
+ANTHROPIC_REASONING_EFFORT="medium" # Optional, "low", "medium", "high", "xhigh", or "max" (varies by model)
 ```
 
 #### Google Gemini
@@ -194,7 +194,7 @@ ANTHROPIC_REASONING_EFFORT="medium" # Optional, "low", "medium", or "high"
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 GEMINI_API_KEY="your-gemini-api-key"
-GEMINI_THINKING_LEVEL="high" # Optional, "minimal", "low", "medium", or "high"
+GEMINI_THINKING_LEVEL="high" # Optional, "minimal", "low", "medium", or "high" (varies by model)
 ```
 
 ### Environment Variables
@@ -220,7 +220,7 @@ Alternatively, you can configure the plugin using global environment variables i
 If `SMART_SUGGESTION_BINARY` is not specified, we look for one in the following locations:
 
 1. `smart-suggestion` beside the current `smart-suggestion.plugin.zsh`
-1. `~/.config/smart-suggestion/smart-suggestion`
+2. `smart-suggestion` beside your `config.zsh` (the directory of `$SMART_SUGGESTION_CONFIG`, default `~/.config/smart-suggestion`)
 
 ### Advanced Configuration
 
@@ -248,13 +248,13 @@ GEMINI_MODEL="gemini-3.1-pro-preview"  # Default: gemini-3.7-flash
 ```bash
 # ~/.config/smart-suggestion/config.zsh
 # OpenAI
-OPENAI_REASONING_EFFORT="medium"        # Options: low, medium, high
+OPENAI_REASONING_EFFORT="medium"        # Options: none, minimal, low, medium, high, xhigh, max
 
 # Azure OpenAI
-AZURE_OPENAI_REASONING_EFFORT="medium"  # Options: low, medium, high
+AZURE_OPENAI_REASONING_EFFORT="medium"  # Options: none, minimal, low, medium, high, xhigh, max
 
 # Anthropic Claude
-ANTHROPIC_REASONING_EFFORT="medium"     # Options: low, medium, high
+ANTHROPIC_REASONING_EFFORT="medium"     # Options: low, medium, high, xhigh, max
 
 # Google Gemini
 GEMINI_THINKING_LEVEL="high"            # Options: minimal, low, medium, high
@@ -287,15 +287,27 @@ smart-suggestion
 1. **Start typing a command** or describe what you want to do
 2. **Press `CTRL + O`** (or your configured key)
 3. **Wait for the AI suggestion** (loading animation will show)
-   - _Note: On first use, proxy mode will automatically start in the background to capture terminal context_
+   - _Note: Unless your terminal provides native scrollback (see below), proxy mode automatically wraps your shell session in a recorder at shell startup to capture terminal context_
 4. **The suggestion will appear** as:
    - An autosuggestion you can accept with `→` (for completions)
    - A completely new command that replaces your input (for new commands)
 
+## CLI Commands
+
+Besides the suggestion flow invoked by the plugin, the `smart-suggestion` binary ships a few subcommands:
+
+- `smart-suggestion update`: Update the binary and plugin to the latest GitHub release. The plugin notifies you when an update is available; run this to install it.
+- `smart-suggestion update --check-only`: Only check whether a newer release is available, without installing.
+- `smart-suggestion rotate-logs --log-file <path>`: Rotate a log file (safe to run while the proxy is still writing it).
+- `smart-suggestion version`: Print version, build time, git commit, OS, and architecture.
+
+> [!NOTE]
+> In an interactive shell with the plugin loaded, the `smart-suggestion` name is shadowed by the plugin's status function. Run the binary through its path (`$SMART_SUGGESTION_BINARY`) instead, e.g. `"$SMART_SUGGESTION_BINARY" update`.
+
 ## How It Works
 
 1. **Input Capture**: The plugin captures your current command line input
-2. **Proxy Mode (Default)**: Automatically starts a background shell recording session to capture terminal output for better context
+2. **Proxy Mode (Default)**: Wraps your shell session in a PTY-based recorder at shell startup to capture terminal output for better context (skipped when a terminal with native scrollback integration is detected)
 3. **Context Collection**: Gathers rich shell context including user info, directory, command history, aliases, and terminal scrollback content via proxy mode
 4. **AI Processing**: Sends the input and context to your configured AI provider
 5. **Smart Response**: AI returns either a completion (`+`) or new command (`=`)
@@ -303,12 +315,12 @@ smart-suggestion
 
 ### Proxy Mode (New Default)
 
-Smart Suggestion now automatically enables **proxy mode** by default, which provides significantly better context awareness by recording your terminal session. This mode:
+Smart Suggestion automatically enables **proxy mode** by default, which provides significantly better context awareness by recording your terminal session. This mode:
 
-- **Automatically starts** when you first use smart suggestions
-- **Records terminal output** using the `script` command for maximum compatibility
-- **Provides rich context** to the AI including command outputs and error messages
+- **Starts automatically** when your shell starts, wrapping your session in a PTY-based recorder (no external tools required)
+- **Records terminal output** including command results and error messages, giving the AI rich context
 - **Works seamlessly** across different terminal environments
+- **Is skipped** when a terminal with native scrollback integration is detected (Tmux, Herdr, Kitty, Ghostty; see below)
 
 You can disable proxy mode if needed:
 
@@ -316,8 +328,6 @@ You can disable proxy mode if needed:
 # ~/.config/smart-suggestion/config.zsh
 SMART_SUGGESTION_PROXY_MODE=false
 ```
-
-For advanced proxy configuration, see [PROXY_USAGE.md](PROXY_USAGE.md).
 
 ### Terminal-Specific Integrations
 
@@ -378,7 +388,3 @@ rm -f smart-suggestion
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
-
-## License
-
-This project is open source. Please check the repository for license details.

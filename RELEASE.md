@@ -9,7 +9,7 @@ The project includes an automated release workflow (`.github/workflows/release.y
 1. **Builds binaries** for multiple platforms:
    - Linux (x86_64, ARM64)
    - macOS (Intel, Apple Silicon)
-   - Windows (x86_64)
+   - Android (ARM64, Termux)
 
 2. **Creates release packages** containing:
    - Platform-specific binary (`smart-suggestion`)
@@ -112,6 +112,6 @@ Before creating a release:
 The current setup supports:
 - **Linux**: x86_64, ARM64
 - **macOS**: Intel (x86_64), Apple Silicon (ARM64)  
-- **Windows**: x86_64
+- **Android**: ARM64 (Termux)
 
 To add new platforms, update the matrix in `.github/workflows/release.yml`.

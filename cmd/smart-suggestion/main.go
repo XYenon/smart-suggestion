@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/xyenon/smart-suggestion/internal/debug"
@@ -205,9 +204,14 @@ func init() {
 }
 
 func resolveSystemPrompt(sendContext bool) string {
+	prompt := systemPrompt
+	if prompt == "" {
+		prompt = os.Getenv("SMART_SUGGESTION_SYSTEM_PROMPT")
+	}
+
 	basePrompt := defaultSystemPrompt
-	if systemPrompt != "" {
-		basePrompt = systemPrompt
+	if prompt != "" {
+		basePrompt = prompt
 	}
 
 	if !sendContext {
@@ -246,7 +250,7 @@ func buildUserInput(input string, scrollbackLines int, scrollbackFile string, se
 }
 
 func selectProvider(ctx *cobra.Command) (provider.Provider, error) {
-	switch strings.ToLower(providerName) {
+	switch providerName {
 	case "openai":
 		return provider.NewOpenAIProvider()
 	case "azure_openai":
@@ -286,7 +290,7 @@ func buildRootCmd() *cobra.Command {
 
 	rootCmd.Flags().StringVarP(&providerName, "provider", "p", "", "AI provider (openai, azure_openai, anthropic, gemini)")
 	rootCmd.Flags().StringVarP(&input, "input", "i", "", "User input")
-	rootCmd.Flags().StringVarP(&systemPrompt, "system", "s", "", "System prompt (optional, uses default if not provided)")
+	rootCmd.Flags().StringVarP(&systemPrompt, "system", "s", "", "System prompt (optional, defaults to $SMART_SUGGESTION_SYSTEM_PROMPT or the built-in prompt)")
 	rootCmd.Flags().BoolVarP(&dbg, "debug", "d", false, "Enable debug logging")
 	rootCmd.Flags().StringVarP(&outputFile, "output", "o", "-", "Output file path")
 	rootCmd.Flags().BoolVarP(&sendContext, "context", "c", false, "Include context information")

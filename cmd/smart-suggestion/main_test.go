@@ -53,6 +53,49 @@ func TestResolveSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveSystemPromptEnvFallback(t *testing.T) {
+	original := systemPrompt
+	oldBuildSystemContext := buildSystemContextFunc
+	t.Cleanup(func() {
+		systemPrompt = original
+		buildSystemContextFunc = oldBuildSystemContext
+	})
+
+	buildSystemContextFunc = func() (string, error) {
+		return "mocked system context", nil
+	}
+
+	// The --system flag takes precedence over the environment variable.
+	t.Setenv("SMART_SUGGESTION_SYSTEM_PROMPT", "env prompt")
+	systemPrompt = "flag prompt"
+	if got := resolveSystemPrompt(false); got != "flag prompt" {
+		t.Fatalf("expected flag prompt, got %q", got)
+	}
+
+	// Without the flag, SMART_SUGGESTION_SYSTEM_PROMPT is used.
+	systemPrompt = ""
+	if got := resolveSystemPrompt(false); got != "env prompt" {
+		t.Fatalf("expected env prompt, got %q", got)
+	}
+
+	// The env prompt is combined with context like a custom prompt.
+	got := resolveSystemPrompt(true)
+	if got != "env prompt\n\nmocked system context" {
+		t.Fatalf("expected env prompt with context, got %q", got)
+	}
+}
+
+func TestResolveSystemPromptEnvUnset(t *testing.T) {
+	original := systemPrompt
+	t.Cleanup(func() { systemPrompt = original })
+
+	systemPrompt = ""
+	t.Setenv("SMART_SUGGESTION_SYSTEM_PROMPT", "")
+	if got := resolveSystemPrompt(false); got != defaultSystemPrompt {
+		t.Fatalf("expected default prompt, got %q", got)
+	}
+}
+
 func TestBuildUserInputWithScrollback(t *testing.T) {
 	old := buildUserContextFunc
 	buildUserContextFunc = func(scrollbackLines int, scrollbackFile string) (string, error) {
@@ -192,6 +235,12 @@ func TestSelectProvider(t *testing.T) {
 	providerName = "unknown"
 	if _, err := selectProvider(cmd); err == nil {
 		t.Fatal("expected error for unknown provider")
+	}
+
+	// Provider names are matched exactly; case variants are rejected.
+	providerName = "OpenAI"
+	if _, err := selectProvider(cmd); err == nil {
+		t.Fatal("expected error for non-lowercase provider name")
 	}
 }
 
