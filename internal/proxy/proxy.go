@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,63 +21,6 @@ import (
 	"github.com/xyenon/smart-suggestion/pkg"
 	"golang.org/x/term"
 )
-
-// ansiEscapeRegex matches ANSI escape sequences including:
-// - CSI sequences: ESC [ ... (most common, used for colors, cursor movement, etc.)
-// - OSC sequences: ESC ] ... BEL or ESC ] ... ST (operating system commands)
-// - Other escape sequences: ESC followed by various characters
-var ansiEscapeRegex = regexp.MustCompile(`\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|\[[^\x1b]*|[PX^_][^\x1b]*\x1b\\|.)`)
-
-// oscContentRegex matches leftover OSC content (e.g., "7;file://..." after ESC ] is stripped)
-var oscContentRegex = regexp.MustCompile(`^\d+;[^\n]*`)
-
-// stripANSI removes ANSI escape sequences and simulates terminal behavior for control characters
-func stripANSI(s string) string {
-	// First pass: remove ANSI escape sequences
-	s = ansiEscapeRegex.ReplaceAllString(s, "")
-	// Second pass: remove leftover OSC content at line start
-	s = oscContentRegex.ReplaceAllString(s, "")
-	// Third pass: simulate terminal behavior
-	s = simulateTerminal(s)
-	return s
-}
-
-// simulateTerminal processes control characters to simulate terminal display
-func simulateTerminal(s string) string {
-	runes := []rune(s)
-	var result []rune
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		switch r {
-		case '\x08': // Backspace: delete previous character
-			if len(result) > 0 && result[len(result)-1] != '\n' {
-				result = result[:len(result)-1]
-			}
-		case '\r': // Carriage return
-			// Check if this is \r\n (Windows line ending) - treat as just \n
-			if i+1 < len(runes) && runes[i+1] == '\n' {
-				continue // Skip \r, the \n will be added in next iteration
-			}
-			// Otherwise, move cursor to beginning of line (erase current line content)
-			lastNewline := -1
-			for j := len(result) - 1; j >= 0; j-- {
-				if result[j] == '\n' {
-					lastNewline = j
-					break
-				}
-			}
-			result = result[:lastNewline+1]
-		case '\x07': // Bell: ignore
-		case '\x00', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06': // Control chars: ignore
-		case '\x0b', '\x0c': // Vertical tab, form feed: treat as newline
-			result = append(result, '\n')
-		case '\x0e', '\x0f', '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17', '\x18', '\x19', '\x1a', '\x1c', '\x1d', '\x1e', '\x1f', '\x7f': // Other control chars: ignore
-		default:
-			result = append(result, r)
-		}
-	}
-	return string(result)
-}
 
 type ProxyOptions struct {
 	LogFile         string
@@ -123,25 +65,15 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	})
 
 	c := execCommand(shell)
-	ptmx, err := pty.Start(c)
+	width, height := terminalSize(stdin)
+	ptmx, err := pty.StartWithSize(c, &pty.Winsize{
+		Rows: uint16(height),
+		Cols: uint16(width),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to start PTY: %w", err)
 	}
 	defer func() { _ = ptmx.Close() }()
-
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGWINCH)
-	go func() {
-		for range ch {
-			if f, ok := stdin.(*os.File); ok {
-				if err := pty.InheritSize(f, ptmx); err != nil {
-					debug.Log("Error resizing pty", map[string]any{"error": err.Error()})
-				}
-			}
-		}
-	}()
-	ch <- syscall.SIGWINCH
-	defer func() { signal.Stop(ch); close(ch) }()
 
 	var oldState *term.State
 	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
@@ -178,10 +110,46 @@ func RunProxyWithIO(shell string, opts ProxyOptions, stdin io.Reader, stdout io.
 	if scrollbackLines <= 0 {
 		scrollbackLines = 100
 	}
-	limitedLogWriter := newLineLimitedWriter(logFile, sessionLogFile, scrollbackLines)
-	defer limitedLogWriter.Close()
+	vtLogWriter := newVTSink(logFile, sessionLogFile, scrollbackLines, width, height)
+	defer vtLogWriter.Close()
 
-	teeWriter := io.MultiWriter(stdout, limitedLogWriter)
+	resize := func() {
+		f, ok := stdin.(*os.File)
+		if !ok {
+			return
+		}
+		if err := pty.InheritSize(f, ptmx); err != nil {
+			debug.Log("Error resizing pty", map[string]any{"error": err.Error()})
+			return
+		}
+		width, height = terminalSize(stdin)
+		vtLogWriter.Resize(width, height)
+	}
+	resize()
+
+	resizeCh := make(chan os.Signal, 1)
+	resizeDone := make(chan struct{})
+	var resizeWG sync.WaitGroup
+	resizeWG.Add(1)
+	signal.Notify(resizeCh, syscall.SIGWINCH)
+	go func() {
+		defer resizeWG.Done()
+		for {
+			select {
+			case <-resizeCh:
+				resize()
+			case <-resizeDone:
+				return
+			}
+		}
+	}()
+	defer func() {
+		signal.Stop(resizeCh)
+		close(resizeDone)
+		resizeWG.Wait()
+	}()
+
+	teeWriter := io.MultiWriter(stdout, bestEffortLogWriter{writer: vtLogWriter})
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -400,119 +368,30 @@ func cleanupOldSessionLogs(baseLogPath string, maxAge time.Duration) error {
 	return nil
 }
 
-type lineLimitedWriter struct {
-	file     *os.File
-	filePath string
-	maxLines int
-	lines    []string
-	writePos int
-	buf      []byte
-	mu       sync.Mutex
+func terminalSize(stdin io.Reader) (width, height int) {
+	const defaultWidth, defaultHeight = 80, 24
+	f, ok := stdin.(*os.File)
+	if !ok || !term.IsTerminal(int(f.Fd())) {
+		return defaultWidth, defaultHeight
+	}
+	width, height, err := term.GetSize(int(f.Fd()))
+	if err != nil || width <= 0 || height <= 0 {
+		return defaultWidth, defaultHeight
+	}
+	return width, height
 }
 
-func newLineLimitedWriter(file *os.File, filePath string, maxLines int) *lineLimitedWriter {
-	if maxLines <= 0 {
-		maxLines = 1
-	}
-	return &lineLimitedWriter{
-		file:     file,
-		filePath: filePath,
-		maxLines: maxLines,
-		lines:    make([]string, maxLines),
-	}
+type bestEffortLogWriter struct {
+	writer io.Writer
 }
 
-func (w *lineLimitedWriter) Write(p []byte) (n int, err error) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.buf = append(w.buf, p...)
-
-	for {
-		idx := -1
-		for i, b := range w.buf {
-			if b == '\n' {
-				idx = i
-				break
-			}
-		}
-		if idx == -1 {
-			break
-		}
-
-		line := string(w.buf[:idx+1])
-		w.buf = w.buf[idx+1:]
-
-		// Strip ANSI escape sequences before storing
-		line = stripANSI(line)
-		w.lines[w.writePos] = line
-		w.writePos = (w.writePos + 1) % w.maxLines
+func (w bestEffortLogWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
 	}
-
-	if err := w.flush(); err != nil {
-		return len(p), err
-	}
-
-	return len(p), nil
-}
-
-func (w *lineLimitedWriter) Close() error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.file == nil {
-		return nil
-	}
-	err := w.file.Close()
-	w.file = nil
-	return err
-}
-
-func (w *lineLimitedWriter) flush() error {
-	return pkg.WithLogRotateLock(w.filePath, w.flushLocked)
-}
-
-func (w *lineLimitedWriter) flushLocked() error {
-	if err := w.reopenIfRotated(); err != nil {
-		return err
-	}
-	if err := w.file.Truncate(0); err != nil {
-		return err
-	}
-	if _, err := w.file.Seek(0, 0); err != nil {
-		return err
-	}
-	for i := 0; i < w.maxLines; i++ {
-		idx := (w.writePos + i) % w.maxLines
-		line := w.lines[idx]
-		if line == "" {
-			continue
-		}
-		if _, err := w.file.WriteString(line); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (w *lineLimitedWriter) reopenIfRotated() error {
-	info, err := os.Stat(w.filePath)
-	switch {
-	case err == nil:
-		current, statErr := w.file.Stat()
-		if statErr == nil && os.SameFile(current, info) {
-			return nil
-		}
-	case !os.IsNotExist(err):
-		return err
-	}
-
-	if w.file != nil {
-		_ = w.file.Close()
-	}
-	f, err := os.OpenFile(w.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		return fmt.Errorf("failed to reopen session log file after rotation: %w", err)
+		debug.Log("Failed to capture PTY output", map[string]any{"error": err.Error()})
 	}
-	w.file = f
-	return nil
+	return len(p), nil
 }
