@@ -2,6 +2,7 @@ package zsh
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -326,6 +327,56 @@ echo STATE_WIDGET_REGISTERED
 func (s *zshSession) TriggerSuggest() {
 	// Send ^O (Ctrl-O) which is bound to _do_smart_suggestion
 	_, _ = s.pty.Write([]byte{0x0f})
+}
+
+func TestFastPathHistoryPreservesZshEvents(t *testing.T) {
+	session, err := spawnZsh()
+	if err != nil {
+		t.Fatalf("Failed to spawn zsh: %v", err)
+	}
+	defer session.Close()
+
+	_, _ = session.pty.Write([]byte("setopt EXTENDED_HISTORY\r\n"))
+	_, _ = session.pty.Write([]byte("echo HISTORY_SINGLE_MARKER\r\n"))
+	if _, err := session.Expect("HISTORY_SINGLE_MARKER", 10*time.Second); err != nil {
+		t.Fatalf("single-line history command did not execute: %v", err)
+	}
+
+	_, _ = session.pty.Write([]byte("printf '%s\\n' 'HISTORY_MULTI_ONE\r\nHISTORY_MULTI_TWO'\r\n"))
+	if _, err := session.Expect("HISTORY_MULTI_TWO", 10*time.Second); err != nil {
+		t.Fatalf("multi-line history command did not execute: %v", err)
+	}
+
+	historyFile := filepath.Join(session.tmpDir, "fast_path_history")
+	_, _ = session.pty.Write([]byte(fmt.Sprintf("_smart_suggestion_fast_path_history >| %q; echo HISTORY_CAPTURED\r\n", historyFile)))
+	if _, err := session.Expect("HISTORY_CAPTURED", 10*time.Second); err != nil {
+		t.Fatalf("history capture did not finish: %v", err)
+	}
+
+	encoded, err := os.ReadFile(historyFile)
+	if err != nil {
+		t.Fatalf("read encoded history: %v", err)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(encoded)))
+	if err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+
+	events := bytes.Split(decoded, []byte{0})
+	foundSingle := false
+	foundMulti := false
+	for _, event := range events {
+		command := string(event)
+		if command == "echo HISTORY_SINGLE_MARKER" {
+			foundSingle = true
+		}
+		if strings.Contains(command, "HISTORY_MULTI_ONE") && strings.Contains(command, "HISTORY_MULTI_TWO") {
+			foundMulti = true
+		}
+	}
+	if !foundSingle || !foundMulti {
+		t.Fatalf("history events were not preserved: single=%v multi=%v events=%q", foundSingle, foundMulti, events)
+	}
 }
 
 func TestEmptyBufferAppendSuggestion(t *testing.T) {

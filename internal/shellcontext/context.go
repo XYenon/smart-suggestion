@@ -174,6 +174,11 @@ func getHistory() (string, error) {
 	return "", nil
 }
 
+// GetScrollback returns the latest scrollback lines.
+func GetScrollback(scrollbackLines int, scrollbackFile string) (string, error) {
+	return getScrollback(scrollbackLines, scrollbackFile)
+}
+
 func getScrollback(scrollbackLines int, scrollbackFile string) (string, error) {
 	content, err := doGetScrollback(scrollbackLines, scrollbackFile)
 	if err != nil {

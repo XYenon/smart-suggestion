@@ -19,6 +19,9 @@ fi
 (( ! ${+SMART_SUGGESTION_HISTORY_LINES} )) &&
     typeset -g SMART_SUGGESTION_HISTORY_LINES=10
 
+(( ! ${+SMART_SUGGESTION_FAST_PATH_HISTORY_LINES} )) &&
+    typeset -g SMART_SUGGESTION_FAST_PATH_HISTORY_LINES=2000
+
 (( ! ${+SMART_SUGGESTION_SCROLLBACK_LINES} )) &&
     typeset -g SMART_SUGGESTION_SCROLLBACK_LINES=${SMART_SUGGESTION_BUFFER_LINES:-100}
 
@@ -140,9 +143,37 @@ function _smart_suggestion_shell_history() {
     fc -ln -$SMART_SUGGESTION_HISTORY_LINES 2>/dev/null
 }
 
+function _smart_suggestion_fast_path_history() {
+    local lines="$SMART_SUGGESTION_FAST_PATH_HISTORY_LINES"
+    if [[ ! "$lines" =~ '^[1-9][0-9]*$' ]]; then
+        lines=2000
+    fi
+
+    zmodload zsh/parameter 2>/dev/null || return 1
+
+    local -a event_numbers
+    event_numbers=(${(on)${(k)history}})
+    (( ${#event_numbers} == 0 )) && return 0
+
+    local start=1
+    if (( ${#event_numbers} > lines )); then
+        start=$(( ${#event_numbers} - lines + 1 ))
+    fi
+
+    local encoded
+    encoded=$({
+        local event
+        for event in ${event_numbers[$start,-1]}; do
+            print -rn -- "${history[$event]}"$'\0'
+        done
+    } | base64 2>/dev/null) || return 1
+    print -r -- "${encoded//$'\n'/}"
+}
+
 function _fetch_suggestions() {
     local scrollback_file="$1"
     local error_file="$2"
+    local fast_path_buffer="$3"
 
     # Source config file and export all variables
     _smart_suggestion_source_config
@@ -157,6 +188,10 @@ function _fetch_suggestions() {
     local shell_aliases=$(_smart_suggestion_shell_aliases)
     local available_commands=$(_smart_suggestion_available_commands)
     local shell_history=$(_smart_suggestion_shell_history)
+    local fast_path_history_base64=""
+    if [[ -n "$TYPESAFE_API_KEY" ]]; then
+        fast_path_history_base64=$(_smart_suggestion_fast_path_history)
+    fi
 
     # Prepare scrollback file args (use array for proper argument handling)
     local scrollback_file_args=()
@@ -167,6 +202,8 @@ function _fetch_suggestions() {
     export SMART_SUGGESTION_ALIASES="$shell_aliases"
     export SMART_SUGGESTION_COMMANDS="$available_commands"
     export SMART_SUGGESTION_HISTORY="$shell_history"
+    export SMART_SUGGESTION_FAST_PATH_HISTORY_BASE64="$fast_path_history_base64"
+    export SMART_SUGGESTION_BUFFER="$fast_path_buffer"
 
     exec "$SMART_SUGGESTION_BINARY" \
         --provider "$SMART_SUGGESTION_AI_PROVIDER" \
@@ -235,14 +272,15 @@ function _do_smart_suggestion() {
         fi
     fi
 
-    local input=$(printf '%s' "${BUFFER:0:$CURSOR}" | tr '\n' ';')
+    local fast_path_buffer="${BUFFER:0:$CURSOR}"
+    local input=$(printf '%s' "$fast_path_buffer" | tr '\n' ';')
 
     _zsh_autosuggest_clear
 
     ##### Fetch message
     # Write the suggestion to a per-shell temp file so the worker PID is not
     # mixed into stdout (numeric replies like "=42" were being read as the PID).
-    _fetch_suggestions "$scrollback_file" "$error_file" > "$out_file" &
+    _fetch_suggestions "$scrollback_file" "$error_file" "$fast_path_buffer" > "$out_file" &
     local pid=$!
 
     _show_loading_animation $pid "$canceled_file"
@@ -376,6 +414,11 @@ function smart-suggestion() {
     echo "    - SMART_SUGGESTION_AI_PROVIDER: AI provider to use ('openai', 'azure_openai', 'anthropic', or 'gemini', value: $SMART_SUGGESTION_AI_PROVIDER)."
     echo "    - SMART_SUGGESTION_DEBUG: Enable debug logging (default: false, value: $SMART_SUGGESTION_DEBUG)."
     echo "    - SMART_SUGGESTION_HISTORY_LINES: Number of history lines to send (default: 10, value: $SMART_SUGGESTION_HISTORY_LINES)."
+    echo "    - TYPESAFE_SYSTEMONE_URL: Complete TypeSafe System One endpoint (default: https://api.typesafe.ai/v1/systemone, value: ${TYPESAFE_SYSTEMONE_URL:-https://api.typesafe.ai/v1/systemone})."
+    echo "    - TYPESAFE_MODEL: Jev model used by the fast path (default: jev-latest, value: ${TYPESAFE_MODEL:-jev-latest})."
+    echo "    - SMART_SUGGESTION_FAST_PATH_HISTORY_LINES: Number of history lines searched by the Jev fast path (default: 2000, value: $SMART_SUGGESTION_FAST_PATH_HISTORY_LINES)."
+    echo "    - SMART_SUGGESTION_FAST_PATH_CONFIDENCE_THRESHOLD: Minimum Jev confidence (default: 0.6, value: ${SMART_SUGGESTION_FAST_PATH_CONFIDENCE_THRESHOLD:-0.6})."
+    echo "    - SMART_SUGGESTION_FAST_PATH_PROBABILITY_THRESHOLD: Minimum selected-option probability (default: 0.7, value: ${SMART_SUGGESTION_FAST_PATH_PROBABILITY_THRESHOLD:-0.7})."
     echo "    - SMART_SUGGESTION_SCROLLBACK_LINES: Number of scrollback lines to send (default: 100, value: $SMART_SUGGESTION_SCROLLBACK_LINES)."
     echo "    - SMART_SUGGESTION_AUTO_UPDATE: Enable automatic update checking (default: true, value: $SMART_SUGGESTION_AUTO_UPDATE)."
     echo "    - SMART_SUGGESTION_UPDATE_INTERVAL: Days between update checks (default: 7, value: $SMART_SUGGESTION_UPDATE_INTERVAL)."

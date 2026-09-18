@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"os"
@@ -666,6 +667,7 @@ func (m *mockProvider) FetchWithHistory(ctx context.Context, input, systemPrompt
 
 func TestRunSuggestSuccess(t *testing.T) {
 	oldSelect := selectProviderFunc
+	oldFastPath := tryFastPathFunc
 	oldOutput := outputFile
 	oldInput := input
 	oldProvider := providerName
@@ -673,6 +675,7 @@ func TestRunSuggestSuccess(t *testing.T) {
 	oldContext := sendContext
 	t.Cleanup(func() {
 		selectProviderFunc = oldSelect
+		tryFastPathFunc = oldFastPath
 		outputFile = oldOutput
 		input = oldInput
 		providerName = oldProvider
@@ -682,6 +685,9 @@ func TestRunSuggestSuccess(t *testing.T) {
 
 	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
 		return &mockProvider{response: "=ls -la", err: nil}, nil
+	}
+	tryFastPathFunc = func(context.Context, string, string, bool) (string, bool) {
+		return "", false
 	}
 	outputFile = filepath.Join(t.TempDir(), "output.txt")
 	input = "list files"
@@ -702,6 +708,66 @@ func TestRunSuggestSuccess(t *testing.T) {
 	}
 	if string(content) != "=ls -la" {
 		t.Fatalf("expected '=ls -la', got %q", string(content))
+	}
+}
+
+func TestRunSuggestFastPathSkipsProvider(t *testing.T) {
+	oldSelect := selectProviderFunc
+	oldFastPath := tryFastPathFunc
+	oldOutput := outputFile
+	oldInput := input
+	oldProvider := providerName
+	t.Cleanup(func() {
+		selectProviderFunc = oldSelect
+		tryFastPathFunc = oldFastPath
+		outputFile = oldOutput
+		input = oldInput
+		providerName = oldProvider
+	})
+
+	tryFastPathFunc = func(context.Context, string, string, bool) (string, bool) {
+		return "+atus", true
+	}
+	selectProviderFunc = func(cmd *cobra.Command) (provider.Provider, error) {
+		t.Fatal("provider should not be selected after a fast-path hit")
+		return nil, nil
+	}
+	outputFile = filepath.Join(t.TempDir(), "output.txt")
+	input = "git st"
+	providerName = "mock"
+
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	if err := runSuggest(cmd, nil); err != nil {
+		t.Fatalf("runSuggest() error = %v", err)
+	}
+	content, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if string(content) != "+atus" {
+		t.Fatalf("output = %q, want +atus", content)
+	}
+}
+
+func TestTryFastPathUsesSeparateHistory(t *testing.T) {
+	t.Setenv("TYPESAFE_API_KEY", "test-key")
+	t.Setenv("SMART_SUGGESTION_FAST_PATH_HISTORY_BASE64", base64.StdEncoding.EncodeToString([]byte("ls\x00git status\x00")))
+
+	got, ok := tryFastPath(t.Context(), "git st", "", true)
+	if !ok || got != "+atus" {
+		t.Fatalf("tryFastPath() = %q, %v; want +atus, true", got, ok)
+	}
+}
+
+func TestTryFastPathUsesRawMultilineBuffer(t *testing.T) {
+	t.Setenv("TYPESAFE_API_KEY", "test-key")
+	t.Setenv("SMART_SUGGESTION_BUFFER", "printf 'first\n")
+	t.Setenv("SMART_SUGGESTION_FAST_PATH_HISTORY_BASE64", base64.StdEncoding.EncodeToString([]byte("ls\x00printf 'first\nsecond'\x00")))
+
+	got, ok := tryFastPath(t.Context(), "printf 'first;", "", true)
+	if !ok || got != "+second'" {
+		t.Fatalf("tryFastPath() = %q, %v; want +second', true", got, ok)
 	}
 }
 

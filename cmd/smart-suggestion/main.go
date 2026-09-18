@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
 	"github.com/xyenon/smart-suggestion/internal/debug"
+	"github.com/xyenon/smart-suggestion/internal/fastpath"
 	"github.com/xyenon/smart-suggestion/internal/paths"
 	"github.com/xyenon/smart-suggestion/internal/provider"
 	"github.com/xyenon/smart-suggestion/internal/proxy"
@@ -192,6 +194,7 @@ var runProxyFunc = proxy.RunProxy
 var checkUpdateFunc = updater.CheckUpdate
 var installUpdateFunc = updater.InstallUpdate
 var selectProviderFunc = selectProvider
+var tryFastPathFunc = tryFastPath
 
 func init() {
 	config := pkg.DefaultLogRotateConfig()
@@ -361,6 +364,14 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("required flag \"provider\" not set")
 	}
 
+	if suggestion, ok := tryFastPathFunc(cmd.Context(), input, scrollbackFile, sendContext); ok {
+		debug.Log("Selected suggestion from history fast path", map[string]any{
+			"input":      input,
+			"suggestion": suggestion,
+		})
+		return writeSuggestion(outputFile, suggestion)
+	}
+
 	systemPromptStr := resolveSystemPrompt(sendContext)
 	userInput := buildUserInput(input, scrollbackLines, scrollbackFile, sendContext)
 	providerClient, err := selectProviderFunc(cmd)
@@ -399,6 +410,29 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return nil
+}
+
+func tryFastPath(ctx context.Context, buffer, scrollbackFile string, allowRemote bool) (string, bool) {
+	selector := fastpath.NewSelectorFromEnv()
+	if !selector.Enabled() {
+		return "", false
+	}
+	if rawBuffer, ok := os.LookupEnv("SMART_SUGGESTION_BUFFER"); ok {
+		buffer = rawBuffer
+	}
+
+	history, err := fastpath.DecodeHistory(os.Getenv("SMART_SUGGESTION_FAST_PATH_HISTORY_BASE64"))
+	if err != nil {
+		return "", false
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		cwd = "unknown"
+	}
+
+	return selector.Suggest(ctx, buffer, history, cwd, allowRemote, func(lines int) (string, error) {
+		return shellcontext.GetScrollback(lines, scrollbackFile)
+	})
 }
 
 func runProxy(cmd *cobra.Command, args []string) {
