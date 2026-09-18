@@ -197,25 +197,43 @@ GEMINI_API_KEY="your-gemini-api-key"
 GEMINI_THINKING_LEVEL="high" # Optional, "minimal", "low", "medium", or "high" (varies by model)
 ```
 
+#### Jev History Fast Path (optional)
+
+Set a TypeSafe API key to enable a fast path that selects only commands already present in shell history. Jev ranks a locally built shortlist and never generates command text. Errors, timeouts, uncertain results, and `none` selections automatically fall back to the configured LLM provider.
+
+```bash
+# ~/.config/smart-suggestion/config.zsh
+TYPESAFE_API_KEY="your-typesafe-api-key"
+```
+
 ### Environment Variables
 
 Alternatively, you can configure the plugin using global environment variables in your `.zshrc` (requires `export`).
 
-| Variable                             | Description                           | Default                                 | Options                                                 |
-|--------------------------------------|---------------------------------------|-----------------------------------------|---------------------------------------------------------|
-| `SMART_SUGGESTION_CONFIG`            | Path to the configuration file        | `~/.config/smart-suggestion/config.zsh` | Any valid file path                                     |
-| `SMART_SUGGESTION_AI_PROVIDER`       | AI provider to use                    | Auto-detected                           | `openai`, `azure_openai`, `anthropic`, `gemini`         |
-| `SMART_SUGGESTION_KEY`               | Keybinding to trigger suggestions     | `^o`                                    | Any zsh keybinding                                      |
-| `SMART_SUGGESTION_SEND_CONTEXT`      | Send shell context to AI              | `true`                                  | `true`, `false`                                         |
-| `SMART_SUGGESTION_PROXY_MODE`        | Enable proxy mode for better context  | `true`                                  | `true`, `false`                                         |
-| `SMART_SUGGESTION_DEBUG`             | Enable debug logging                  | `false`                                 | `true`, `false`                                         |
-| `SMART_SUGGESTION_HISTORY_LINES`     | Number of history lines to send       | `10`                                    | Any positive integer                                    |
-| `SMART_SUGGESTION_SCROLLBACK_LINES`  | Number of scrollback lines to send    | `100`                                   | Any positive integer                                    |
-| `SMART_SUGGESTION_SYSTEM_PROMPT`     | Custom system prompt                  | Built-in                                | Any string                                              |
-| `SMART_SUGGESTION_AUTO_UPDATE`       | Enable automatic update checking      | `true`                                  | `true`, `false`                                         |
-| `SMART_SUGGESTION_UPDATE_INTERVAL`   | Days between update checks            | `7`                                     | Any positive integer                                    |
-| `SMART_SUGGESTION_BINARY`            | Path to the `smart-suggestion` binary | Auto-detected                           | Any valid filepath to a valid `smart-suggestion` binary |
-| `SMART_SUGGESTION_CACHE_DIR`         | Cache directory for logs and state    | `~/.cache/smart-suggestion`             | Any valid directory path                                |
+| Variable                                            | Description                              | Default                                 | Options                                                 |
+|-----------------------------------------------------|------------------------------------------|-----------------------------------------|---------------------------------------------------------|
+| `TYPESAFE_API_KEY`                                  | TypeSafe key enabling the Jev fast path  | Unset                                   | TypeSafe API key                                        |
+| `TYPESAFE_SYSTEMONE_URL`                            | Complete TypeSafe System One endpoint    | `https://api.typesafe.ai/v1/systemone`  | Any valid HTTP(S) URL                                   |
+| `TYPESAFE_MODEL`                                    | Jev model used by the fast path          | `jev-latest`                            | Any model supported by the endpoint                     |
+| `SMART_SUGGESTION_CONFIG`                           | Path to the configuration file           | `~/.config/smart-suggestion/config.zsh` | Any valid file path                                     |
+| `SMART_SUGGESTION_AI_PROVIDER`                      | AI provider to use                       | Auto-detected                           | `openai`, `azure_openai`, `anthropic`, `gemini`         |
+| `SMART_SUGGESTION_KEY`                              | Keybinding to trigger suggestions        | `^o`                                    | Any zsh keybinding                                      |
+| `SMART_SUGGESTION_SEND_CONTEXT`                     | Send shell context to AI                 | `true`                                  | `true`, `false`                                         |
+| `SMART_SUGGESTION_PROXY_MODE`                       | Enable proxy mode for better context     | `true`                                  | `true`, `false`                                         |
+| `SMART_SUGGESTION_DEBUG`                            | Enable debug logging                     | `false`                                 | `true`, `false`                                         |
+| `SMART_SUGGESTION_HISTORY_LINES`                    | Number of history lines sent to the LLM  | `10`                                    | Any positive integer                                    |
+| `SMART_SUGGESTION_FAST_PATH_HISTORY_LINES`          | History lines searched by the fast path  | `2000`                                  | Any positive integer                                    |
+| `SMART_SUGGESTION_FAST_PATH_MAX_CANDIDATES`         | Maximum candidates sent to Jev           | `24`                                    | Integer from `2` to `32`                                |
+| `SMART_SUGGESTION_FAST_PATH_SCROLLBACK_LINES`       | Scrollback lines sent to Jev             | `20`                                    | Integer from `0` to `100`                               |
+| `SMART_SUGGESTION_FAST_PATH_CONFIDENCE_THRESHOLD`   | Minimum Jev confidence                   | `0.6`                                   | Number from `0` to `1`                                  |
+| `SMART_SUGGESTION_FAST_PATH_PROBABILITY_THRESHOLD`  | Minimum selected-option probability      | `0.7`                                   | Number from `0` to `1`                                  |
+| `SMART_SUGGESTION_FAST_PATH_TIMEOUT_MS`             | Jev request timeout in milliseconds      | `1200`                                  | Integer from `1` to `10000`                             |
+| `SMART_SUGGESTION_SCROLLBACK_LINES`                 | Number of scrollback lines sent to LLM   | `100`                                   | Any positive integer                                    |
+| `SMART_SUGGESTION_SYSTEM_PROMPT`                    | Custom system prompt                     | Built-in                                | Any string                                              |
+| `SMART_SUGGESTION_AUTO_UPDATE`                      | Enable automatic update checking         | `true`                                  | `true`, `false`                                         |
+| `SMART_SUGGESTION_UPDATE_INTERVAL`                  | Days between update checks               | `7`                                     | Any positive integer                                    |
+| `SMART_SUGGESTION_BINARY`                           | Path to the `smart-suggestion` binary    | Auto-detected                           | Any valid filepath to a valid `smart-suggestion` binary |
+| `SMART_SUGGESTION_CACHE_DIR`                        | Cache directory for logs and state       | `~/.cache/smart-suggestion`             | Any valid directory path                                |
 
 If `SMART_SUGGESTION_BINARY` is not specified, we look for one in the following locations:
 
