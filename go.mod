@@ -3,7 +3,7 @@ module github.com/xyenon/smart-suggestion
 go 1.26.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.73.0
+	github.com/anthropics/anthropic-sdk-go v1.74.0
 	github.com/charmbracelet/x/vt v0.0.0-20260913004009-c615ff2f7805
 	github.com/creack/pty v1.1.24
 	github.com/openai/openai-go v1.12.0
