@@ -4,13 +4,13 @@ go 1.26.0
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.80.0
-	github.com/charmbracelet/x/vt v0.0.0-20260913004009-c615ff2f7805
+	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
 	github.com/openai/openai-go v1.12.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.42.0
 	golang.org/x/term v0.47.0
-	google.golang.org/genai v1.73.0
+	google.golang.org/genai v1.74.0
 )
 
 require (
