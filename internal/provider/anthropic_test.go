@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/v2"
+	"github.com/anthropics/anthropic-sdk-go/v2/option"
 )
 
 func TestNewAnthropicProvider(t *testing.T) {
@@ -204,7 +204,7 @@ func TestAnthropicProvider_Fetch(t *testing.T) {
 	}
 }
 
-func TestAnthropicProvider_Fetch_MaxTokens(t *testing.T) {
+func TestAnthropicProvider_Fetch_RequestParameters(t *testing.T) {
 	// max_tokens caps thinking plus answer text, so it stays at 4096 whether
 	// or not reasoning effort is configured.
 	const expectedMaxTokens float64 = 4096
@@ -267,6 +267,24 @@ func TestAnthropicProvider_Fetch_MaxTokens(t *testing.T) {
 			}
 			if maxTokens != expectedMaxTokens {
 				t.Errorf("expected max_tokens %.0f, got %.0f", expectedMaxTokens, maxTokens)
+			}
+
+			if tc.reasoningEffort == "" {
+				if _, ok := requestBody["thinking"]; ok {
+					t.Errorf("expected thinking to be omitted, got %v", requestBody["thinking"])
+				}
+				if _, ok := requestBody["output_config"]; ok {
+					t.Errorf("expected output_config to be omitted, got %v", requestBody["output_config"])
+				}
+			} else {
+				thinking, ok := requestBody["thinking"].(map[string]any)
+				if !ok || thinking["type"] != "adaptive" {
+					t.Errorf("expected adaptive thinking, got %v", requestBody["thinking"])
+				}
+				outputConfig, ok := requestBody["output_config"].(map[string]any)
+				if !ok || outputConfig["effort"] != tc.reasoningEffort {
+					t.Errorf("expected output effort %q, got %v", tc.reasoningEffort, requestBody["output_config"])
+				}
 			}
 		})
 	}
