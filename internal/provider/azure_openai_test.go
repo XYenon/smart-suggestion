@@ -10,8 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/azure"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/azure"
+	"github.com/openai/openai-go/v3/option"
 )
 
 func TestNewAzureOpenAIProvider(t *testing.T) {
@@ -117,7 +118,7 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.MockStatus)
 				fmt.Fprint(w, tc.MockResponse)
@@ -127,6 +128,7 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 			client := openai.NewClient(
 				azure.WithEndpoint(server.URL, "2024-10-21"),
 				azure.WithAPIKey("test-key"),
+				option.WithHTTPClient(server.Client()),
 			)
 
 			p := &AzureOpenAIProvider{
@@ -158,7 +160,7 @@ func TestAzureOpenAIProvider_Fetch(t *testing.T) {
 }
 
 func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, `{
@@ -177,6 +179,7 @@ func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 	client := openai.NewClient(
 		azure.WithEndpoint(server.URL, "2025-04-01-preview"),
 		azure.WithAPIKey("test-key"),
+		option.WithHTTPClient(server.Client()),
 	)
 
 	p := &AzureOpenAIProvider{
@@ -197,7 +200,7 @@ func TestAzureOpenAIProvider_Fetch_WithReasoningEffort(t *testing.T) {
 func TestAzureOpenAIProvider_Fetch_DefaultAPIVersionWithReasoningEffort(t *testing.T) {
 	var apiVersion string
 	var requestBody map[string]any
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		apiVersion = r.URL.Query().Get("api-version")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -238,6 +241,7 @@ func TestAzureOpenAIProvider_Fetch_DefaultAPIVersionWithReasoningEffort(t *testi
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	p.Client.Chat.Completions.Options = append(p.Client.Chat.Completions.Options, option.WithHTTPClient(server.Client()))
 	if _, err := p.Fetch(t.Context(), "list files", "system prompt"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
