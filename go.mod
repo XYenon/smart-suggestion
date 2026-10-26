@@ -6,7 +6,6 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.84.0
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
-	github.com/openai/openai-go v1.12.0
 	github.com/openai/openai-go/v3 v3.86.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.42.0
@@ -32,6 +31,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
