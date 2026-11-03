@@ -6,7 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go/v2 v2.4.0
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
-	github.com/openai/openai-go/v3 v3.90.0
+	github.com/openai/openai-go/v3 v3.91.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/mod v0.42.0
 	golang.org/x/term v0.47.0
