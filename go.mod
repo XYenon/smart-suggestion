@@ -3,13 +3,13 @@ module github.com/xyenon/smart-suggestion
 go 1.26.0
 
 require (
-	github.com/anthropics/anthropic-sdk-go/v2 v2.7.0
+	github.com/anthropics/anthropic-sdk-go/v2 v2.9.0
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
-	github.com/openai/openai-go/v3 v3.96.0
+	github.com/openai/openai-go/v3 v3.98.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/mod v0.42.0
-	golang.org/x/term v0.47.0
+	golang.org/x/mod v0.43.0
+	golang.org/x/term v0.48.0
 	google.golang.org/genai v1.77.0
 )
 
@@ -63,7 +63,7 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
